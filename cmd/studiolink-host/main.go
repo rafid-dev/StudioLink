@@ -11,25 +11,16 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"text/tabwriter"
-	"time"
 
 	"studiolink/internal/config"
-	"studiolink/internal/hostserver"
 	"studiolink/internal/netif"
-	"studiolink/internal/proc"
 	"studiolink/internal/studio"
-	"studiolink/internal/tailnet"
-	"studiolink/internal/tunnel"
 	"studiolink/internal/version"
 )
 
@@ -40,8 +31,11 @@ Usage:
 
 Commands:
   init        create the config file with a new token
-  serve       run the bridge
-  token       print the token clients must send
+  serve       run the bridge in this console
+  tray        run the bridge in the background with a notification-area icon (Windows)
+  autostart   show or set whether the tray starts at login: autostart [on|off] (Windows)
+  status      show a running bridge's listeners, relays and sessions
+  token       print the token clients must send (-new: make a client token)
   doctor      check that this machine can run the bridge
   interfaces  list network adapters the bridge can serve on
   version     print the version
@@ -67,8 +61,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runInit(rest, stdout, stderr)
 	case "serve":
 		return runServe(rest, stderr)
+	case "tray":
+		return runTray(rest, stdout, stderr)
+	case "autostart":
+		return runAutostart(rest, stdout, stderr)
 	case "token":
 		return runToken(rest, stdout, stderr)
+	case "status":
+		return runStatus(rest, stdout, stderr)
 	case "interfaces":
 		return runInterfaces(rest, stdout, stderr)
 	case "doctor":
@@ -121,8 +121,18 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 
 func runToken(args []string, stdout, stderr io.Writer) int {
 	fset, path := newFlags("token", stderr)
+	fresh := fset.Bool("new", false, `print a new random token for a "clients" entry instead`)
 	if fset.Parse(args) != nil {
 		return 2
+	}
+	if *fresh {
+		token, err := config.NewToken()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintln(stdout, token)
+		return 0
 	}
 	cfg, err := loadConfig(*path)
 	if err != nil {
@@ -177,124 +187,13 @@ func runServe(args []string, stderr io.Writer) int {
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
 
-	cfg, err := loadConfig(*path)
-	if err != nil {
-		log.Error("cannot load config", "err", err)
-		return 1
-	}
-	launcher, err := studio.FindLauncher()
-	if err != nil {
-		log.Error("cannot find Studio MCP", "err", err)
-		return 1
-	}
-	spec := studio.Spec(launcher)
-	srv := hostserver.New(hostserver.Options{
-		Token:          cfg.Token,
-		AllowedOrigins: cfg.AllowedOrigins,
-		MaxSessions:    cfg.SessionLimit(),
-		IdleTimeout:    cfg.IdleTimeout(),
-		Logger:         log,
-		Spawn: func() (hostserver.Process, error) {
-			return proc.Start(spec)
-		},
-	})
-	defer srv.Close()
-
-	httpSrv := &http.Server{
-		Handler:           srv.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	// Fixed addresses must bind now; adapters and the tailnet may come later.
-	errs := make(chan error, len(cfg.Listen)+1)
-	for _, addr := range cfg.Listen {
-		ln, err := net.Listen("tcp", addr)
-		if err != nil {
-			log.Error("cannot listen", "addr", addr, "err", err)
-			return 1
-		}
-		log.Info("listening", "url", "http://"+ln.Addr().String()+"/mcp")
-		go func() { errs <- httpSrv.Serve(ln) }()
-	}
-
 	// Ctrl+C, and on Windows closing the console window, arrive here.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	var background sync.WaitGroup
-	if len(cfg.ListenInterfaces) > 0 {
-		w := &netif.Watcher{
-			Specs: cfg.ListenInterfaces,
-			Log:   log,
-			// Serve returns when the watcher closes a listener; that is expected.
-			Serve: func(ln net.Listener) { _ = httpSrv.Serve(ln) },
-		}
-		background.Go(func() { w.Run(ctx) })
+	if err := runBridge(ctx, *path, log, nil); err != nil {
+		log.Error("studiolink-host stopped", "err", err)
+		return 1
 	}
-
-	var tailSrv *http.Server
-	if ts := cfg.Tailscale; ts != nil {
-		stateDir := ts.StateDir
-		if stateDir == "" {
-			// Next to the config, wherever serve was started from.
-			abs, err := filepath.Abs(*path)
-			if err != nil {
-				log.Error("cannot resolve config path", "err", err)
-				return 1
-			}
-			stateDir = filepath.Join(filepath.Dir(abs), "tsnet")
-		}
-		node, err := tailnet.New(ts, stateDir, log.With("tailnet", ts.DeviceName()))
-		if err != nil {
-			log.Error("cannot start tailnet device", "err", err)
-			return 1
-		}
-		defer node.Close()
-		tailSrv = &http.Server{
-			Handler:           node.IdentifyPeers(srv.Handler(), hostserver.WithPeer),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-		background.Go(func() {
-			ln, url, err := node.Up(ctx)
-			if err != nil {
-				if ctx.Err() == nil {
-					errs <- err
-				}
-				return
-			}
-			log.Info("listening on tailnet", "url", url)
-			if err := tailSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
-				errs <- err
-			}
-		})
-	}
-	for _, relay := range cfg.Relays {
-		d := &tunnel.Dialer{
-			URL:         relay.TunnelURL(),
-			Fingerprint: relay.Fingerprint,
-			Token:       cfg.Token,
-			Log:         log,
-			// Serve returns when the tunnel drops; the dialer reconnects.
-			Serve: func(ln net.Listener) { _ = httpSrv.Serve(ln) },
-		}
-		background.Go(func() { d.Run(ctx) })
-	}
-	log.Info("studiolink-host ready", "version", version.Version, "launcher", launcher)
-
-	select {
-	case <-ctx.Done():
-		log.Info("shutting down")
-	case err := <-errs:
-		log.Error("server stopped", "err", err)
-		stop()
-	}
-	srv.Close()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = httpSrv.Shutdown(shutdownCtx)
-	if tailSrv != nil {
-		_ = tailSrv.Shutdown(shutdownCtx)
-	}
-	background.Wait()
 	return 0
 }
 
@@ -333,6 +232,10 @@ func runInterfaces(args []string, stdout, stderr io.Writer) int {
 
 // describeListen summarizes where a config serves, for status output.
 func describeListen(cfg *config.Config) string {
+	return strings.Join(listenParts(cfg), ", ")
+}
+
+func listenParts(cfg *config.Config) []string {
 	parts := slices.Clone(cfg.Listen)
 	for _, li := range cfg.ListenInterfaces {
 		parts = append(parts, fmt.Sprintf("adapter %q port %d", li.Name, li.Port))
@@ -343,5 +246,5 @@ func describeListen(cfg *config.Config) string {
 	for _, r := range cfg.Relays {
 		parts = append(parts, "relay "+r.TunnelURL())
 	}
-	return strings.Join(parts, ", ")
+	return parts
 }

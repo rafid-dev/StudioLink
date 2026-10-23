@@ -185,12 +185,12 @@ func TestDialRefusals(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		d    Dialer
+		d    *Dialer
 		want string
 	}{
-		{"wrong token", Dialer{URL: tunnelURL, Fingerprint: fp, Token: "wrong"}, "401"},
-		{"wrong fingerprint", Dialer{URL: tunnelURL, Fingerprint: CertFingerprint(other), Token: testToken}, "not the pinned fingerprint"},
-		{"self-signed without pin", Dialer{URL: tunnelURL, Token: testToken}, "certificate"},
+		{"wrong token", &Dialer{URL: tunnelURL, Fingerprint: fp, Token: "wrong"}, "401"},
+		{"wrong fingerprint", &Dialer{URL: tunnelURL, Fingerprint: CertFingerprint(other), Token: testToken}, "not the pinned fingerprint"},
+		{"self-signed without pin", &Dialer{URL: tunnelURL, Token: testToken}, "certificate"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

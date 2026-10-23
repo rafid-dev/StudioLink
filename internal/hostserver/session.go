@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,14 @@ type session struct {
 	id   string
 	proc Process
 	log  *slog.Logger
+
+	// Set once when the session opens.
+	client       *client
+	remote, peer string
+	opened       time.Time
+
+	toolCalls   atomic.Int64
+	closeReason string // set before closed is closed
 
 	writeMu sync.Mutex // serialises writes to proc.Stdin
 
@@ -43,6 +52,8 @@ type waiter struct {
 	seq    uint64
 	events chan []byte // server-initiated messages, best effort
 	resp   chan []byte // the response, exactly once
+	// rewrite, if set, edits the response before the client sees it.
+	rewrite func([]byte) []byte
 }
 
 type getStream struct {
@@ -57,6 +68,7 @@ func newSession(id string, p Process, log *slog.Logger) *session {
 		log:      log,
 		pending:  make(map[string]*waiter),
 		lastUsed: time.Now(),
+		opened:   time.Now(),
 		closed:   make(chan struct{}),
 	}
 	go s.readStdout()
@@ -175,8 +187,10 @@ func (s *session) drainStderr() {
 }
 
 // route delivers one message from StudioMCP: a response goes to the request
-// waiting for it; anything else goes to the GET stream, else the oldest
-// waiting request, else the backlog.
+// waiting for it; anything else goes to the oldest waiting request (Studio
+// sends progress and logs while it works on a call, and that call's stream
+// keeps them in order with its result), else the GET stream, else the
+// backlog.
 func (s *session) route(msg []byte) {
 	env, err := parseEnvelope(msg)
 	if err != nil {
@@ -195,13 +209,6 @@ func (s *session) route(msg []byte) {
 		}
 		return
 	}
-	if s.get != nil {
-		select {
-		case s.get.events <- msg:
-			return
-		default:
-		}
-	}
 	var oldest *waiter
 	for _, w := range s.pending {
 		if oldest == nil || w.seq < oldest.seq {
@@ -211,6 +218,13 @@ func (s *session) route(msg []byte) {
 	if oldest != nil {
 		select {
 		case oldest.events <- msg:
+			return
+		default:
+		}
+	}
+	if s.get != nil {
+		select {
+		case s.get.events <- msg:
 			return
 		default:
 		}
@@ -226,6 +240,7 @@ func (s *session) route(msg []byte) {
 func (s *session) close(reason string) {
 	s.closeOnce.Do(func() {
 		s.log.Info("session closed", "reason", reason)
+		s.closeReason = reason
 		close(s.closed)
 		_ = s.proc.Kill()
 		s.mu.Lock()

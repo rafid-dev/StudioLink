@@ -1,9 +1,12 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"studiolink/internal/policy"
 )
 
 func TestDefaultIsValid(t *testing.T) {
@@ -22,6 +25,8 @@ func TestDefaultIsValid(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	token := strings.Repeat("x", minTokenLen)
+	other := strings.Repeat("y", minTokenLen)
+	lo := []string{"127.0.0.1:1"}
 	tests := []struct {
 		name    string
 		cfg     Config
@@ -44,6 +49,15 @@ func TestValidate(t *testing.T) {
 		{name: "interface without name", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Port: 1}}}, wantErr: "needs a name"},
 		{name: "interface bad port", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Name: "x", Port: 70000}}}, wantErr: "port must be"},
 		{name: "tailscale bad port", cfg: Config{Token: token, Tailscale: &Tailscale{Port: -1}}, wantErr: "tailscale.port"},
+		{name: "tool policy", cfg: Config{Token: token, Listen: lo, Tools: &policy.Tools{Deny: []string{"execute_luau"}}}},
+		{name: "bad tool pattern", cfg: Config{Token: token, Listen: lo, Tools: &policy.Tools{Deny: []string{"[x"}}}, wantErr: "tools:"},
+		{name: "client", cfg: Config{Token: token, Listen: lo, Clients: []Client{{Name: "vps", Token: other}}}},
+		{name: "client without name", cfg: Config{Token: token, Listen: lo, Clients: []Client{{Token: other}}}, wantErr: "needs a name"},
+		{name: "client named owner", cfg: Config{Token: token, Listen: lo, Clients: []Client{{Name: "owner", Token: other}}}, wantErr: "needs a name"},
+		{name: "client short token", cfg: Config{Token: token, Listen: lo, Clients: []Client{{Name: "vps", Token: "x"}}}, wantErr: "at least"},
+		{name: "client reuses main token", cfg: Config{Token: token, Listen: lo, Clients: []Client{{Name: "vps", Token: token}}}, wantErr: "already used"},
+		{name: "duplicate client", cfg: Config{Token: token, Listen: lo, Clients: []Client{{Name: "a", Token: other}, {Name: "a", Token: other + "x"}}}, wantErr: "used twice"},
+		{name: "client bad pattern", cfg: Config{Token: token, Listen: lo, Clients: []Client{{Name: "vps", Token: other, Tools: &policy.Tools{Allow: []string{""}}}}}, wantErr: "client \"vps\" tools"},
 		{name: "wildcard v4", cfg: Config{Token: token, Listen: []string{"0.0.0.0:1"}}, wantErr: "every network interface"},
 		{name: "wildcard v6", cfg: Config{Token: token, Listen: []string{"[::]:1"}}, wantErr: "every network interface"},
 		{name: "empty host", cfg: Config{Token: token, Listen: []string{":1"}}, wantErr: "IP address"},
@@ -80,6 +94,21 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLoadSkipsByteOrderMark(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	c, _ := Default()
+	if err := c.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, append([]byte("\xef\xbb\xbf"), data...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Errorf("config saved with a BOM: %v", err)
+	}
+}
+
 func TestTailscaleDefaults(t *testing.T) {
 	ts := &Tailscale{}
 	if ts.DeviceName() != "studiolink" || ts.ListenPort() != 80 {
@@ -104,6 +133,15 @@ func TestRelayTunnelURL(t *testing.T) {
 	for in, want := range cases {
 		if got := (Relay{URL: in}).TunnelURL(); got != want {
 			t.Errorf("TunnelURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAuditPath(t *testing.T) {
+	cfgPath := filepath.Join("dir", FileName)
+	for log, want := range map[string]string{"": filepath.Join("dir", "audit.jsonl"), "off": "", "D:/logs/a.jsonl": "D:/logs/a.jsonl"} {
+		if got := (&Config{AuditLog: log}).AuditPath(cfgPath); got != want {
+			t.Errorf("AuditPath with %q = %q, want %q", log, got, want)
 		}
 	}
 }

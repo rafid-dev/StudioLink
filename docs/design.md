@@ -39,8 +39,11 @@ multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
 - Loopback by default; other interfaces only when named. `0.0.0.0` needs an
   explicit override.
 - TLS required for dial-out; Tailscale's encryption covers listen-over-tailnet.
-- Optional per-token tool allow/deny lists (for example, no `execute_luau`).
-- Audit log of connections and tool calls.
+- Optional tool allow/deny lists, for every agent and per client token (for
+  example, no `execute_luau`). Denied tools are hidden from `tools/list` and
+  refused before they reach Studio; sessions are bound to their token.
+- Audit log (JSON lines) of sessions, tool calls and refused requests; tool
+  arguments only when opted in.
 
 ## Phases
 1. Scaffold (done): Go module, CLI skeleton, `doctor`, lint and test setup.
@@ -59,7 +62,12 @@ multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
    HTTP through it. Reconnects with backoff. Verified against live Studio
    with the relay in Docker (probe, Inspector tool call, relay restart, wrong
    certificate refused).
-6. Hardening: tool filtering, audit log, Windows service and tray, status.
+6. Hardening (done): tool policy with per-client tokens, audit log,
+   `status` with a single instance per config, tray icon and start at login.
+   A login item (HKCU Run key) replaced the planned Windows service, because
+   a service runs in session 0 and cannot reach the user's Studio or
+   `mcp.bat`. Server messages sent during a call now stay on that call's
+   stream. Verified against live Studio (policy, audit, status, tray).
 7. Packaging: release binaries, client Docker image, per-scenario guides,
    migration configs for Yeetback and Prison Wars.
 

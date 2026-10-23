@@ -12,8 +12,9 @@ import (
 
 // FakeProc is an in-memory stand-in for StudioMCP. It answers initialize,
 // echoes other requests, and has tools that exercise the bridge:
-// "notify" sends a notification before its result, "slow" answers late,
-// "crash" exits without answering.
+// "notify" sends a notification before its result, "announce" sends one
+// after it (so no call is waiting), "slow" answers late, "crash" exits
+// without answering.
 type FakeProc struct {
 	inR, outR, errR *io.PipeReader
 	inW, outW, errW *io.PipeWriter
@@ -21,6 +22,10 @@ type FakeProc struct {
 	once            sync.Once
 	slow            time.Duration
 }
+
+// FakeTools are the tools a FakeProc lists. Calls to tools other than
+// notify, announce, slow and crash are echoed.
+var FakeTools = []string{"notify", "announce", "slow", "crash", "execute_luau", "list_roblox_studios"}
 
 // NewFakeProc starts a fake that answers "slow" after the given delay.
 func NewFakeProc(slow time.Duration) *FakeProc {
@@ -74,9 +79,18 @@ func (p *FakeProc) serve() {
 		switch {
 		case m.Method == "initialize":
 			reply(map[string]any{"protocolVersion": "2025-06-18", "serverInfo": map[string]string{"name": "fake"}})
+		case m.Method == "tools/list":
+			var tools []map[string]string
+			for _, name := range FakeTools {
+				tools = append(tools, map[string]string{"name": name})
+			}
+			reply(map[string]any{"tools": tools})
 		case m.Params.Name == "notify":
 			p.write(map[string]any{"jsonrpc": "2.0", "method": "notifications/message", "params": map[string]string{"data": "hi"}})
 			reply("notified")
+		case m.Params.Name == "announce":
+			reply("announced")
+			p.write(map[string]any{"jsonrpc": "2.0", "method": "notifications/resources/list_changed"})
 		case m.Params.Name == "slow":
 			go func() { time.Sleep(p.slow); reply("slow done") }()
 		case m.Params.Name == "crash":

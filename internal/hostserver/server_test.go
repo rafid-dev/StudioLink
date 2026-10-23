@@ -128,7 +128,7 @@ func TestSessionLifecycle(t *testing.T) {
 	id := h.initialize()
 
 	resp, body := h.do("POST", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, withSession(id))
-	if resp.StatusCode != 200 || !strings.Contains(body, `"echo":"tools/list"`) {
+	if resp.StatusCode != 200 || !strings.Contains(body, `"name":"list_roblox_studios"`) {
 		t.Fatalf("tools/list: %d %s", resp.StatusCode, body)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
@@ -244,11 +244,14 @@ func TestGetStreamReceivesServerMessages(t *testing.T) {
 	defer resp.Body.Close()
 	waitFor(t, func() bool { _, busy := h.srv.lookup(id).idleSince(); return busy })
 
-	// With a GET stream open, the notification goes there, not to the POST.
+	// A notification sent during a call stays on that call's stream, so it
+	// arrives before the result even with a GET stream open.
 	_, body := h.do("POST", call(1, "notify"), withSession(id))
-	if strings.Contains(body, "notifications/message") {
-		t.Errorf("notification went to the POST, want the GET stream:\n%s", body)
+	if !strings.Contains(body, "notifications/message") {
+		t.Errorf("notification sent during the call missing from its POST:\n%s", body)
 	}
+	// One sent when no call is waiting goes to the GET stream.
+	h.do("POST", call(2, "announce"), withSession(id))
 	r := bufio.NewReader(resp.Body)
 	for {
 		line, err := r.ReadString('\n')
@@ -256,6 +259,9 @@ func TestGetStreamReceivesServerMessages(t *testing.T) {
 			t.Fatalf("GET stream ended without the notification: %v", err)
 		}
 		if strings.Contains(line, "notifications/message") {
+			t.Fatalf("notification for a call reached the GET stream: %s", line)
+		}
+		if strings.Contains(line, "list_changed") {
 			break
 		}
 	}

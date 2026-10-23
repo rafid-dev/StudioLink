@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"studiolink/internal/policy"
 	"studiolink/internal/tunnel"
 )
 
@@ -50,6 +52,28 @@ type Config struct {
 	MaxSessions int `json:"max_sessions,omitempty"`
 	// IdleTimeoutMinutes closes sessions with no requests for this long.
 	IdleTimeoutMinutes int `json:"idle_timeout_minutes,omitempty"`
+	// Tools limits which Studio tools the main token may list and call.
+	Tools *policy.Tools `json:"tools,omitempty"`
+	// Clients are further tokens, each with a name (for logs and the audit
+	// log) and its own tool policy.
+	Clients []Client `json:"clients,omitempty"`
+	// AuditLog is where to record sessions and tool calls. Defaults to
+	// audit.jsonl next to the config; "off" disables it.
+	AuditLog string `json:"audit_log,omitempty"`
+	// AuditArguments also records each tool call's arguments, which can
+	// contain whole scripts.
+	AuditArguments bool `json:"audit_arguments,omitempty"`
+}
+
+// AuditOff is the AuditLog value that disables the audit log.
+const AuditOff = "off"
+
+// Client is an extra token, for example a read-only one for an agent on a
+// shared server.
+type Client struct {
+	Name  string        `json:"name"`
+	Token string        `json:"token"`
+	Tools *policy.Tools `json:"tools,omitempty"`
 }
 
 // InterfaceListen serves on every IPv4 address of one network adapter.
@@ -179,6 +203,9 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Notepad and Windows PowerShell 5.1 save UTF-8 with a byte order mark,
+	// which encoding/json rejects.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
@@ -209,6 +236,27 @@ func (c *Config) Save(path string) error {
 func (c *Config) Validate() error {
 	if len(c.Token) < minTokenLen {
 		return fmt.Errorf("token must be at least %d characters (run studiolink-host init)", minTokenLen)
+	}
+	if err := c.Tools.Validate(); err != nil {
+		return fmt.Errorf("tools: %w", err)
+	}
+	names := map[string]bool{}
+	tokens := map[string]bool{c.Token: true}
+	for _, cl := range c.Clients {
+		switch {
+		case cl.Name == "" || cl.Name == "owner":
+			return fmt.Errorf("clients: each client needs a name other than \"owner\"")
+		case names[cl.Name]:
+			return fmt.Errorf("clients: name %q is used twice", cl.Name)
+		case len(cl.Token) < minTokenLen:
+			return fmt.Errorf("client %q: token must be at least %d characters (studiolink-host token -new makes one)", cl.Name, minTokenLen)
+		case tokens[cl.Token]:
+			return fmt.Errorf("client %q: token is already used by another client or the main token", cl.Name)
+		}
+		if err := cl.Tools.Validate(); err != nil {
+			return fmt.Errorf("client %q tools: %w", cl.Name, err)
+		}
+		names[cl.Name], tokens[cl.Token] = true, true
 	}
 	if len(c.Listen) == 0 && len(c.ListenInterfaces) == 0 && c.Tailscale == nil && len(c.Relays) == 0 {
 		return errors.New("nothing to serve on: set listen, listen_interfaces, tailscale or relays")
@@ -262,6 +310,18 @@ func (c *Config) SessionLimit() int {
 		return 16
 	}
 	return c.MaxSessions
+}
+
+// AuditPath returns where the audit log goes for a config loaded from
+// configPath, or "" when it is off.
+func (c *Config) AuditPath(configPath string) string {
+	switch c.AuditLog {
+	case AuditOff:
+		return ""
+	case "":
+		return filepath.Join(filepath.Dir(configPath), "audit.jsonl")
+	}
+	return c.AuditLog
 }
 
 // IdleTimeout returns IdleTimeoutMinutes as a duration, or the default.

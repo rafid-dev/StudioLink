@@ -4,10 +4,12 @@ Lets AI agents in VMs, Docker containers, on Tailscale peers or on external
 servers use Roblox Studio's MCP server, which normally only works on the
 Windows machine running Studio.
 
-**Status:** phase 5. Agents in local Docker containers, WSL2 and local VMs,
+**Status:** phase 6. Agents in local Docker containers, WSL2 and local VMs,
 and on Tailscale peers can connect over HTTP with a token, directly or through
 `studiolink-client` for agents that only run stdio MCP servers. Agents on
-external servers connect through a relay that the Studio PC dials out to. See
+external servers connect through a relay that the Studio PC dials out to.
+Tools can be limited per agent, every session and tool call is audited, and
+the bridge can run from the notification area and start at login. See
 [docs/design.md](docs/design.md) for the architecture and roadmap.
 
 ## Quick start (Docker on this PC)
@@ -111,12 +113,55 @@ TLS-terminating reverse proxy on the same server, use
 `/tunnel` to it. The host reconnects with backoff (1 s to 1 min) when the
 tunnel drops; a relay serves one Studio PC at a time.
 
+## Limiting tools and agents
+`tools` limits what every agent can call; each entry in `clients` gives one
+agent its own token and, optionally, a narrower list. Patterns match tool
+names case-insensitively with `*` and `?`, and `deny` wins over `allow`:
+
+```json
+"tools": {"deny": ["execute_luau"]},
+"clients": [
+  {"name": "reviewer", "token": "<token -new>", "tools": {"allow": ["list_roblox_studios", "get_studio_state", "script_*"]}}
+]
+```
+
+`studiolink-host token -new` makes a client token. Agents don't see tools
+they can't call in `tools/list`, and a call to one is answered with an error
+without reaching Studio. The main `token` is the "owner": only it can read
+`status`, and a session can only be used with the token that opened it.
+
+## Audit log
+`audit.jsonl` next to the config gets one JSON line per session opened or
+closed, tool call (tool, client, result, duration) and refused request (bad
+token or origin). It moves to `audit.jsonl.1` at 10 MB. Tool arguments are
+left out unless `audit_arguments` is on, since they can hold whole scripts.
+Set `audit_log` to another path, or to `"off"`.
+
+## Status, tray and start at login
+`studiolink-host status` shows a running bridge's addresses, relays and
+sessions (`-json` for scripts). Only one bridge runs per config; a second
+`serve` says which process already has it.
+
+On Windows, `studiolink-host tray` runs the bridge in the background with an
+icon in the notification area: blue while waiting, green while agents are
+connected, amber when a relay is down. Its menu shows the sessions and relays
+and opens the log (`studiolink.log` next to the config), the audit log and
+the config folder. **Start at login** (or `studiolink-host autostart on|off`)
+adds the tray to your Windows login items.
+
+This is a login item rather than a Windows service on purpose: a service
+runs in session 0, apart from your desktop, where it cannot see Studio or
+your `%LOCALAPPDATA%\Roblox\mcp.bat`.
+
 ## How it behaves
 - Each MCP session gets its own StudioMCP process, inside a Windows Job
   Object. Ending the session, an idle timeout (30 min) or the bridge crashing
   kills it and everything it started.
 - Replies are plain JSON when quick. Slow tool calls switch to an SSE stream
   with keepalives every 15 s, so proxies and tunnels don't drop them.
+- Progress and log messages Studio sends during a tool call arrive on that
+  call's stream, before its result; anything else goes to the agent's GET
+  stream.
 - `GET /healthz` answers `ok` without a token, for health checks.
 
 ## Config (`studiolink.json`)
@@ -132,6 +177,10 @@ tunnel drops; a relay serves one Studio PC at a time.
 | `tailscale.state_dir` | `tsnet` next to the config | The device's identity; keep it private |
 | `relays[].url` | none | Relay to dial out to: `wss://host:44771` (`ws://` only to loopback) |
 | `relays[].fingerprint` | none | The relay certificate's `sha256:` fingerprint; leave out for a certificate from a public CA |
+| `tools.allow`, `tools.deny` | all allowed | Tool name patterns every agent is limited to |
+| `clients[]` | none | Extra agents: `name`, `token` (32+ characters) and optional `tools` |
+| `audit_log` | `audit.jsonl` next to the config | Audit log path, or `"off"` |
+| `audit_arguments` | `false` | Record tool call arguments (up to 64 KB each) in the audit log |
 | `allow_all_interfaces` | `false` | Permit wildcard listen addresses |
 | `allowed_origins` | none | Browser origins allowed to call the bridge |
 | `max_sessions` | `16` | Concurrent sessions (StudioMCP processes) |

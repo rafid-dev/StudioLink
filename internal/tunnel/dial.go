@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -30,6 +31,41 @@ type Dialer struct {
 	Log   *slog.Logger
 
 	MinBackoff, MaxBackoff time.Duration // default 1s and 1m
+
+	mu      sync.Mutex
+	up      bool
+	since   time.Time // when up last changed
+	lastErr error
+}
+
+// DialerState is a snapshot of a Dialer for status output.
+type DialerState struct {
+	Connected bool
+	Since     time.Time // when the tunnel came up or went down
+	LastError string    // why the last attempt or tunnel failed
+}
+
+// State reports whether the tunnel is up.
+func (d *Dialer) State() DialerState {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	st := DialerState{Connected: d.up, Since: d.since}
+	if d.lastErr != nil {
+		st.LastError = d.lastErr.Error()
+	}
+	return st
+}
+
+func (d *Dialer) setState(up bool, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if up != d.up || d.since.IsZero() {
+		d.since = time.Now()
+	}
+	d.up = up
+	if err != nil {
+		d.lastErr = err
+	}
 }
 
 // Run connects and reconnects until ctx ends.
@@ -43,6 +79,7 @@ func (d *Dialer) Run(ctx context.Context) {
 	backoff := d.MinBackoff
 	for {
 		up, err := d.once(ctx)
+		d.setState(false, err)
 		if ctx.Err() != nil {
 			return
 		}
@@ -73,6 +110,7 @@ func (d *Dialer) once(ctx context.Context) (time.Duration, error) {
 		return 0, err
 	}
 	start := time.Now()
+	d.setState(true, nil)
 	d.Log.Info("connected to relay", "relay", d.URL)
 	stop := context.AfterFunc(ctx, func() { sess.Close() })
 	defer stop()
