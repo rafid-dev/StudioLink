@@ -1,0 +1,94 @@
+services:
+  claude:
+    build:
+      context: .
+    image: yeetback-claude:latest
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    # Fixed flags live in entrypoint so that `docker compose run --rm claude <args>`
+    # appends the user's args to claude instead of replacing the flags.
+    # --mcp-config=<path> (not two words): the flag is variadic, so a separate path would
+    # swallow the user's positional args (e.g. `claude.ps1 "prompt"`) as config files.
+    entrypoint: ["claude", "--dangerously-skip-permissions", "--mcp-config=/opt/claude/mcp.json"]
+    environment:
+      # Bare name: passed through only when the host has it set.
+      - CLAUDE_CODE_OAUTH_TOKEN
+    # STUDIOLINK_TOKEN for the Studio MCP bridge; studiolink-host writes this
+    # file and keeps it current (ensure-studiolink.ps1 starts the bridge).
+    env_file:
+      - ${APPDATA}/StudioLink/studiolink.env
+    volumes:
+      - type: bind
+        source: ../..
+        target: /workspace
+      - type: volume
+        source: claude-home
+        target: /home/node/.claude
+      - type: bind
+        source: ./mcp.json
+        target: /opt/claude/mcp.json
+        read_only: true
+      # Shares the project's Claude memory with the host.
+      - type: bind
+        source: ${USERPROFILE}/.claude/projects/D--Roblox-Projects-Yeetback/memory
+        target: /home/node/.claude/projects/-workspace/memory
+    # Rojo serve (default port). Loopback only. Used with --service-ports.
+    # Conflicts with claude-ssh, which also publishes 34872. claude.ps1 skips
+    # --service-ports while claude-ssh is running.
+    ports:
+      - "127.0.0.1:34872:34872"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Long-running SSH target for Claude Desktop (Code > SSH). Start with ssh-up.ps1
+  # or `docker compose up -d claude-ssh`. Same image and volumes as `claude`, plus
+  # the host keys and the client public key. No Anthropic credentials are passed in.
+  claude-ssh:
+    build:
+      context: .
+    image: yeetback-claude:latest
+    # Root only for sshd. Login sessions run as node (AllowUsers node).
+    user: root
+    init: true
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/ssh-entrypoint.sh"]
+    command: ["/usr/sbin/sshd", "-D", "-e"]
+    # STUDIOLINK_TOKEN for the Studio MCP bridge; studiolink-host writes this
+    # file and keeps it current (ensure-studiolink.ps1 starts the bridge).
+    env_file:
+      - ${APPDATA}/StudioLink/studiolink.env
+    working_dir: /workspace
+    volumes:
+      - type: bind
+        source: ../..
+        target: /workspace
+      - type: volume
+        source: claude-home
+        target: /home/node/.claude
+      - type: bind
+        source: ./mcp.json
+        target: /opt/claude/mcp.json
+        read_only: true
+      - type: volume
+        source: ssh-host-keys
+        target: /etc/ssh/host_keys
+      # Public key only. The private half stays on the host.
+      - type: bind
+        source: ${USERPROFILE}/.ssh/yeetback_container.pub
+        target: /etc/ssh/authorized_keys/node
+        read_only: true
+      # Shares the project's Claude memory with the host.
+      - type: bind
+        source: ${USERPROFILE}/.claude/projects/D--Roblox-Projects-Yeetback/memory
+        target: /home/node/.claude/projects/-workspace/memory
+    # 2222 is SSH (loopback only). 34872 is Rojo serve, the same port as `claude`.
+    ports:
+      - "127.0.0.1:2222:22"
+      - "127.0.0.1:34872:34872"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  claude-home:
+  ssh-host-keys:

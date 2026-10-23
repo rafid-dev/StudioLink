@@ -30,6 +30,11 @@ Usage:
   studiolink-host <command> [flags]
 
 Commands:
+  setup       install StudioLink, create the config and start it (what double-clicking does)
+  connect     print the commands that connect an agent: connect [docker|wsl|vm|tailscale|server]
+  start       start the bridge in the background unless it is running (Windows)
+  stop        stop the running bridge
+  add-relay   dial out to a relay: add-relay wss://server:44771 sha256:<fingerprint>
   init        create the config file with a new token
   serve       run the bridge in this console
   tray        run the bridge in the background with a notification-area icon (Windows)
@@ -49,6 +54,9 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
+		if openedFromExplorer() {
+			return runDoubleClick(stdout, stderr)
+		}
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
@@ -57,6 +65,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version":
 		fmt.Fprintf(stdout, "studiolink-host %s (protocol %d)\n", version.Version, version.ProtocolVersion)
 		return 0
+	case "setup":
+		return runSetup(rest, os.Stdin, stdout, stderr)
+	case "connect":
+		return runConnect(rest, stdout, stderr)
+	case "start":
+		return runStart(rest, stdout, stderr)
+	case "stop":
+		return runStop(rest, stdout, stderr)
+	case "add-relay":
+		return runAddRelay(rest, stdout, stderr)
 	case "init":
 		return runInit(rest, stdout, stderr)
 	case "serve":
@@ -80,6 +98,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
 		return 2
 	}
+}
+
+// executable is this program's path.
+func executable() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "studiolink-host.exe"
+	}
+	return exe
 }
 
 // newFlags returns a flag set with the shared -config flag.

@@ -22,3 +22,6 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# The token file studiolink-host writes next to the config
+studiolink.env

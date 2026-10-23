@@ -4,53 +4,82 @@ Lets AI agents in VMs, Docker containers, on Tailscale peers or on external
 servers use Roblox Studio's MCP server, which normally only works on the
 Windows machine running Studio.
 
-**Status:** phase 6. Agents in local Docker containers, WSL2 and local VMs,
+**Status:** phase 7. Agents in local Docker containers, WSL2 and local VMs,
 and on Tailscale peers can connect over HTTP with a token, directly or through
 `studiolink-client` for agents that only run stdio MCP servers. Agents on
 external servers connect through a relay that the Studio PC dials out to.
 Tools can be limited per agent, every session and tool call is audited, and
-the bridge can run from the notification area and start at login. See
+the bridge runs from the notification area and can start at login. See
 [docs/design.md](docs/design.md) for the architecture and roadmap.
 
-## Quick start (Docker on this PC)
-On Windows, with Roblox Studio open:
+## Quick start
+On the Windows PC with Roblox Studio:
+
+1. Unzip `StudioLink-<version>-windows-amd64.zip` and double-click
+   `studiolink-host.exe`. Setup installs it to
+   `%LOCALAPPDATA%\Programs\StudioLink`, puts it on your PATH, makes a config
+   with a new token, offers WSL2 access and start at login, and starts the
+   bridge in the notification area. Run it again any time; it keeps your
+   config and token.
+2. In a new terminal, print the commands for where your agent runs, with
+   your address and token filled in:
 
 ```powershell
-go build -o studiolink-host.exe ./cmd/studiolink-host
-.\studiolink-host.exe init     # writes %APPDATA%\StudioLink\studiolink.json with a new token
-.\studiolink-host.exe serve    # leave running; -v logs every request
-.\studiolink-host.exe token    # the token clients must send
+studiolink-host connect            # lists: docker, wsl, vm, tailscale, server
+studiolink-host connect docker
 ```
 
-In the container, point any Streamable HTTP MCP client at the bridge. For
-Claude Code:
+For Claude Code in a container on this PC that is one line:
 
 ```bash
-claude mcp add --transport http Roblox_Studio http://host.docker.internal:44770/mcp --header "Authorization: Bearer <token>"
+claude mcp add --transport http -s user Roblox_Studio http://host.docker.internal:44770/mcp --header "Authorization: Bearer <token>"
 ```
 
-Clients may send the token as `Authorization: Bearer <token>` or
-`X-MCP-Auth: <token>`.
+Guides: [Docker](docs/guides/docker.md), [WSL2](docs/guides/wsl.md),
+[VMs](docs/guides/vm.md), [Tailscale](docs/guides/tailscale.md),
+[external servers](docs/guides/server.md). Moving an existing game:
+[Yeetback](docs/migration/yeetback/README.md),
+[Prison Wars](docs/migration/prison-wars/README.md).
+
+`studiolink-host setup -yes` does the same without questions, for scripts.
+Its `-no-install`, `-no-path`, `-no-autostart` and `-no-start` flags skip
+steps. `studiolink-host start` starts the bridge unless it is running (for
+scripts that need it), and `studiolink-host stop` stops it.
+
+## The token, without copying it
+The bridge writes `%APPDATA%\StudioLink\studiolink.env` (`STUDIOLINK_TOKEN=...`)
+and keeps it current. Containers load it with `env_file` or
+`docker run --env-file`, and Claude Code fills `${STUDIOLINK_TOKEN}` into
+`.mcp.json` headers. `studiolink-client` reads it directly on the Studio PC,
+from `/mnt/c/...` in WSL2, or mounted at `/run/secrets/studiolink_token`.
 
 ## Agents that only run stdio MCP servers
 `studiolink-client` runs next to the agent (Linux, macOS or Windows) and
-gives it an ordinary stdio MCP server that forwards to the bridge:
+gives it an ordinary stdio MCP server that forwards to the bridge. Install it
+from the bridge itself:
 
 ```bash
-GOOS=linux go build -o studiolink-client ./cmd/studiolink-client   # on the dev machine
-
-export STUDIOLINK_URL=http://host.docker.internal:44770/mcp
-export STUDIOLINK_TOKEN=<token>          # or pass -token-file PATH
+curl -fsSL http://<bridge>:44770/install.sh | sh
 studiolink-client check                  # ok ... RobloxStudio 1.0.0, MCP 2025-06-18, 28 tools
-
-claude mcp add Roblox_Studio -e STUDIOLINK_URL=$STUDIOLINK_URL -e STUDIOLINK_TOKEN=$STUDIOLINK_TOKEN -- studiolink-client connect
+claude mcp add -s user Roblox_Studio -- studiolink-client connect
 ```
 
-There is no `-token` flag, because command lines are visible to other
-processes. When the agent stops, the client ends its session on the bridge,
-so Studio MCP processes don't linger until the idle timeout. It warns if the
-token would cross the internet unencrypted (plain `http://` to a public
-address).
+With no flags, the client looks for the bridge on `host.docker.internal` in a
+container, on Windows' side of WSL2 (loopback, then the default gateway) and
+on `127.0.0.1`. It takes the token from `-token-file`, `STUDIOLINK_TOKEN`,
+`STUDIOLINK_TOKEN_FILE`, `/run/secrets/studiolink_token`, its saved
+`studiolink.env`, and in WSL2 the bridge's own file. Elsewhere (a VM, a
+tailnet peer), run once:
+
+```bash
+studiolink-client save -url http://<bridge>:44770/mcp   # asks for the token, checks it, saves it
+```
+
+`-url` and `STUDIOLINK_URL` still work. There is no `-token` flag, because
+command lines are visible to other processes. When the agent stops, the
+client ends its session on the bridge, so Studio MCP processes don't linger
+until the idle timeout. It warns if the token would cross the internet
+unencrypted (plain `http://` to a public address).
 
 ## WSL2 and local VMs
 `studiolink-host interfaces` lists this PC's network adapters and what each
@@ -75,7 +104,8 @@ be installed on the Studio PC, and no firewall rule is needed:
 "tailscale": {"hostname": "studiolink"}
 ```
 
-On first `serve`, the log prints a login URL; open it to add the device (or
+Restart the bridge (`studiolink-host stop`, `studiolink-host start`). The
+first time, the log (tray menu: **Open log**) prints a login URL; open it to add the device (or
 set `TS_AUTHKEY` in the environment). Peers then connect to
 `http://studiolink.<tailnet>.ts.net/mcp` with the token, and the log names the
 tailnet user and device behind each session.
@@ -91,13 +121,15 @@ studiolink-client relay                  # leave running; tunnel on :44771, agen
 ```
 
 On first start it makes a self-signed certificate (kept in
-`~/.config/StudioLink`) and prints the `relays` entry for the Studio PC,
-including the certificate's fingerprint; `studiolink-client fingerprint`
-prints it again. Add it to `studiolink.json` and restart `serve`:
+`~/.config/StudioLink`) and prints the command to run on the Studio PC,
+including the certificate's fingerprint (`studiolink-client fingerprint`
+prints it again). It adds the relay to the config and restarts the bridge:
 
-```json
-"relays": [{"url": "wss://vps.example.com:44771", "fingerprint": "sha256:..."}]
+```powershell
+studiolink-host add-relay wss://vps.example.com:44771 sha256:...
 ```
+
+The relay also runs in Docker; see [docs/guides/server.md](docs/guides/server.md).
 
 Port 44771 must be open on the server. Agents on the server then use
 `http://127.0.0.1:44770/mcp` with the token, directly or through
@@ -192,4 +224,9 @@ Requires Go 1.27+.
 ```powershell
 go run ./cmd/studiolink-host doctor   # check that mcp.bat and the config are found
 .\check.ps1                           # gofmt, vet, staticcheck, tests, cross-builds
+.\release.ps1 -Version v0.7.0         # dist\: host zips with every client, client binaries, SHA256SUMS
+docker build -t studiolink-client .   # the client image (runs the relay by default)
 ```
+
+A `go build` of the host has no `clients` folder next to it, so it can't
+serve `/install.sh`; `connect` says how to build the client instead.

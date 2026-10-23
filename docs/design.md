@@ -68,8 +68,18 @@ multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
    a service runs in session 0 and cannot reach the user's Studio or
    `mcp.bat`. Server messages sent during a call now stay on that call's
    stream. Verified against live Studio (policy, audit, status, tray).
-7. Packaging: release binaries, client Docker image, per-scenario guides,
-   migration configs for Yeetback and Prison Wars.
+7. Packaging (done): `release.ps1` builds host zips that carry every client
+   build, plus loose clients and `SHA256SUMS`; a distroless client image runs
+   the relay. Double-clicking the host runs `setup` (install, PATH, config,
+   token file, WSL2 access, start at login, tray), and `connect <scenario>`
+   prints filled-in commands. `studiolink.env` hands containers the token;
+   the client finds the bridge and token on its own in Docker, WSL2 and on
+   the PC, and `save` stores them elsewhere. `add-relay` replaces config
+   editing for dial-out. Guides per scenario and migration files for Yeetback
+   and Prison Wars are in `docs/`. Verified from the release zip against live
+   Studio: setup, re-setup, start/stop, discovery on Windows, in WSL2 (via the
+   gateway) and in Docker (env file and secret mount), `/install.sh`, a
+   `list_roblox_studios` call over stdio, and a Docker relay via `add-relay`.
 
 ## Prior art
 - Yeetback (`docker/claude/`): Python `mcp-proxy` over HTTP on 127.0.0.1:8765.

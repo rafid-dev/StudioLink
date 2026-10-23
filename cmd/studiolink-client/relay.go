@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -118,11 +117,11 @@ func runRelay(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	log.Info("relay ready",
 		"agents", "http://"+agentLn.Addr().String()+"/mcp",
 		"tunnel", scheme+"://"+tunnelLn.Addr().String()+tunnel.Path)
-	fmt.Fprintf(stdout, "Waiting for studiolink-host. On the Studio PC, add this relay to studiolink.json:\n\n")
+	fmt.Fprintf(stdout, "Waiting for studiolink-host. On the Studio PC, run this with this server's address:\n\n")
 	if fingerprint != "" {
-		fmt.Fprintf(stdout, "  \"relays\": [{\"url\": \"wss://<this server>:%s\", \"fingerprint\": \"%s\"}]\n\n", portOf(tunnelLn.Addr()), fingerprint)
+		fmt.Fprintf(stdout, "  studiolink-host add-relay wss://<this server>:%s %s\n\n", portOf(tunnelLn.Addr()), fingerprint)
 	} else {
-		fmt.Fprintf(stdout, "  \"relays\": [{\"url\": \"wss://<this server's domain>\"}]\n\n")
+		fmt.Fprintf(stdout, "  studiolink-host add-relay wss://<this server's domain>\n\n")
 	}
 
 	select {
@@ -204,20 +203,4 @@ func isLoopbackAddr(addr string) bool {
 func portOf(a net.Addr) string {
 	_, port, _ := net.SplitHostPort(a.String())
 	return port
-}
-
-// readToken reads the token from a file or STUDIOLINK_TOKEN.
-func readToken(tokenFile string, getenv func(string) string) (string, error) {
-	token := strings.TrimSpace(getenv("STUDIOLINK_TOKEN"))
-	if tokenFile != "" {
-		b, err := os.ReadFile(tokenFile)
-		if err != nil {
-			return "", fmt.Errorf("token file: %w", err)
-		}
-		token = strings.TrimSpace(string(b))
-	}
-	if token == "" {
-		return "", errors.New("no token: set STUDIOLINK_TOKEN or pass -token-file (studiolink-host token prints it)")
-	}
-	return token, nil
 }

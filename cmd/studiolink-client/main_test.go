@@ -40,7 +40,7 @@ func TestRun(t *testing.T) {
 		{name: "version", args: []string{"version"}, wantStdout: "studiolink-client dev (protocol 1)"},
 		{name: "help", args: []string{"help"}, wantStdout: "connect"},
 		{name: "unknown", args: []string{"nope"}, wantCode: 2, wantStderr: `unknown command "nope"`},
-		{name: "no url", args: []string{"check"}, wantCode: 2, wantStderr: "no bridge URL"},
+		{name: "no url", args: []string{"check"}, wantCode: 2, wantStderr: "no bridge found at http://127.0.0.1:44770"},
 		{name: "bad url", args: []string{"check", "-url", "ftp://x"}, wantCode: 2, wantStderr: "bad -url"},
 		{name: "no token", args: []string{"check", "-url", "http://127.0.0.1:1/mcp"}, wantCode: 2, wantStderr: "no token"},
 		{name: "missing token file", args: []string{"check", "-url", "http://127.0.0.1:1/mcp", "-token-file", filepath.Join(t.TempDir(), "nope")}, wantCode: 2, wantStderr: "token file"},

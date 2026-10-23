@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "Roblox_Studio": {
+      "type": "http",
+      "url": "http://host.docker.internal:44770/mcp",
+      "headers": {
+        "Authorization": "Bearer ${STUDIOLINK_TOKEN}"
+      }
+    }
+  }
+}

@@ -20,6 +20,7 @@ import (
 	"studiolink/internal/proc"
 	"studiolink/internal/studio"
 	"studiolink/internal/tailnet"
+	"studiolink/internal/tokenfile"
 	"studiolink/internal/tunnel"
 	"studiolink/internal/version"
 )
@@ -37,6 +38,8 @@ type bridge struct {
 	audit   *audit.Log
 	dialers []*tunnel.Dialer
 	run     *runFile
+
+	stop context.CancelFunc // ends the bridge, as Ctrl+C does
 
 	mu         sync.Mutex
 	tailnetURL string
@@ -58,6 +61,9 @@ func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func
 		return fmt.Errorf("cannot find Studio MCP: %w", err)
 	}
 	b := &bridge{cfg: cfg, cfgPath: abs, log: log, started: time.Now()}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	b.stop = cancel
 
 	// The status port goes first: claiming the run file is how a second
 	// copy of the bridge finds out it would fight the first one.
@@ -71,6 +77,11 @@ func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func
 		return err
 	}
 	defer b.run.release()
+
+	// Agents' setups read the token from here; keep it in step with the config.
+	if err := tokenfile.Write(tokenfile.PathFor(abs), cfg.Token); err != nil {
+		log.Warn("cannot write the token file for agents", "path", tokenfile.PathFor(abs), "err", err)
+	}
 
 	if path := cfg.AuditPath(abs); path != "" {
 		if b.audit, err = audit.Open(path, 0, log); err != nil {
@@ -99,12 +110,18 @@ func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func
 	})
 	defer b.srv.Close()
 
+	files := newDownloads()
 	httpSrv := &http.Server{
-		Handler:           b.srv.Handler(),
+		Handler:           files.wrap(b.srv.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	ctrlMux := http.NewServeMux()
 	ctrlMux.Handle("/status", b.srv.OwnerOnly(http.HandlerFunc(b.serveStatus)))
+	ctrlMux.Handle("POST /stop", b.srv.OwnerOnly(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		log.Info("stop requested")
+		w.WriteHeader(http.StatusNoContent)
+		b.stop()
+	})))
 	// /ping tells a second copy that this one is alive without a token, so
 	// the check does not land in the audit log as a refused request.
 	ctrlMux.HandleFunc("/ping", func(w http.ResponseWriter, _ *http.Request) {
@@ -124,7 +141,6 @@ func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func
 	}
 	go func() { errs <- ctrlSrv.Serve(ctrlLn) }()
 
-	ctx, cancel := context.WithCancel(ctx)
 	var background sync.WaitGroup
 	defer func() {
 		cancel()
@@ -153,7 +169,7 @@ func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func
 		}
 		defer node.Close()
 		tailSrv = &http.Server{
-			Handler:           node.IdentifyPeers(b.srv.Handler(), hostserver.WithPeer),
+			Handler:           files.wrap(node.IdentifyPeers(b.srv.Handler(), hostserver.WithPeer)),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		background.Go(func() {
@@ -186,6 +202,9 @@ func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func
 		background.Go(func() { d.Run(ctx) })
 	}
 	attrs := []any{"version", version.Version, "launcher", launcher}
+	if files.available() {
+		attrs = append(attrs, "client_downloads", true)
+	}
 	if b.audit != nil {
 		attrs = append(attrs, "audit_log", b.audit.Path())
 	}

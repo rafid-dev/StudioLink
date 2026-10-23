@@ -31,6 +31,7 @@ Commands:
   connect      be a stdio MCP server that forwards to studiolink-host
                (this is the command to give your agent)
   check        test the connection and print what the bridge offers
+  save         remember the bridge's URL and token on this machine
   relay        on a server the Studio PC can reach: accept studiolink-host's
                tunnel and serve agents on this server (dial-out mode)
   fingerprint  print the relay certificate's fingerprint for studiolink.json
@@ -61,6 +62,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return runConnect(args[1:], stdin, stdout, stderr, getenv)
 	case "check":
 		return runCheck(args[1:], stdout, stderr, getenv)
+	case "save":
+		return runSave(args[1:], stdin, stdout, stderr, getenv)
 	case "relay":
 		return runRelay(args[1:], stdout, stderr, getenv)
 	case "fingerprint":
@@ -95,7 +98,14 @@ func parseTarget(name string, args []string, stderr io.Writer, getenv func(strin
 		return nil, nil, err
 	}
 	if *rawURL == "" {
-		return nil, nil, errors.New("no bridge URL: pass -url or set STUDIOLINK_URL")
+		*rawURL = savedURL(getenv)
+	}
+	if *rawURL == "" {
+		found, err := discoverURL(getenv)
+		if err != nil {
+			return nil, nil, err
+		}
+		*rawURL = found
 	}
 	u, err := url.Parse(*rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

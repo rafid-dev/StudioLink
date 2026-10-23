@@ -1,0 +1,33 @@
+services:
+  dev:
+    build: ./.devcontainer
+    container_name: prison-wars-dev
+    hostname: prison-wars
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:2223:22"
+    volumes:
+      - .:/workspace
+      - claude-home:/home/node/.claude
+      - ssh-hostkeys:/etc/ssh/keys
+      # Roblox Studio MCP through StudioLink (.mcp.json runs
+      # "studiolink-client connect"). Both files come from the StudioLink
+      # install on Windows and stay current with it; the client reads the
+      # token from /run/secrets and finds the bridge at host.docker.internal.
+      - type: bind
+        source: ${LOCALAPPDATA}/Programs/StudioLink/clients/studiolink-client-linux-amd64
+        target: /usr/local/bin/studiolink-client
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${APPDATA}/StudioLink/studiolink.env
+        target: /run/secrets/studiolink_token
+        read_only: true
+        bind:
+          create_host_path: false
+    working_dir: /workspace
+
+volumes:
+  claude-home:
+  ssh-hostkeys:

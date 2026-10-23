@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sync/atomic"
@@ -34,7 +33,7 @@ func runTray(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if !*background {
-		return detachTray(abs, *verbose, stdout, stderr)
+		return detachTray(executable(), abs, *verbose, stdout, stderr)
 	}
 
 	logPath := filepath.Join(filepath.Dir(abs), "studiolink.log")
@@ -60,18 +59,13 @@ func runTray(args []string, stdout, stderr io.Writer) int {
 	return t.exitCode
 }
 
-// detachTray relaunches the tray as a process with no console.
-func detachTray(cfgPath string, verbose bool, stdout, stderr io.Writer) int {
+// detachTray launches exe's tray as a process with no console.
+func detachTray(exe, cfgPath string, verbose bool, stdout, stderr io.Writer) int {
 	if info, err := readRunFile(runFilePath(cfgPath)); err == nil && info.alive() {
 		fmt.Fprintf(stderr, "studiolink-host is already running with this config (pid %d)\n", info.PID)
 		return 1
 	}
 	if _, err := loadConfig(cfgPath); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	exe, err := os.Executable()
-	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -87,10 +81,47 @@ func detachTray(cfgPath string, verbose bool, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cannot start the tray:", err)
 		return 1
 	}
-	_ = cmd.Process.Release()
-	fmt.Fprintf(stdout, "StudioLink is running in the notification area (pid %d).\nLog: %s\n",
-		cmd.Process.Pid, filepath.Join(filepath.Dir(cfgPath), "studiolink.log"))
+	logPath := filepath.Join(filepath.Dir(cfgPath), "studiolink.log")
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+	// Wait until it serves, so a script can use the bridge as soon as this
+	// returns.
+	deadline := time.After(30 * time.Second)
+	for {
+		if info, err := readRunFile(runFilePath(cfgPath)); err == nil && info.PID == cmd.Process.Pid && info.alive() {
+			break
+		}
+		select {
+		case <-exited:
+			fmt.Fprintf(stderr, "StudioLink stopped while starting; see %s\n", logPath)
+			return 1
+		case <-deadline:
+			fmt.Fprintf(stderr, "StudioLink did not start within 30 s; see %s\n", logPath)
+			return 1
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	fmt.Fprintf(stdout, "StudioLink is running in the notification area (pid %d).\nLog: %s\n", cmd.Process.Pid, logPath)
 	return 0
+}
+
+// runStart makes sure a bridge is running in the background, for scripts:
+// it starts the tray unless one is already up, and succeeds either way.
+func runStart(args []string, stdout, stderr io.Writer) int {
+	fset, path := newFlags("start", stderr)
+	if fset.Parse(args) != nil {
+		return 2
+	}
+	abs, err := filepath.Abs(*path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if info, err := readRunFile(runFilePath(abs)); err == nil && info.alive() {
+		fmt.Fprintf(stdout, "StudioLink is already running (pid %d).\n", info.PID)
+		return 0
+	}
+	return detachTray(executable(), abs, false, stdout, stderr)
 }
 
 type tray struct {
@@ -211,14 +242,6 @@ func (t *tray) finish(err error) {
 		messageBox("StudioLink stopped", err.Error()+"\n\nLog: "+t.logPath)
 	}
 	systray.Quit()
-}
-
-func executable() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "studiolink-host.exe"
-	}
-	return exe
 }
 
 // openFile shows a text file in Notepad, which every Windows install has
