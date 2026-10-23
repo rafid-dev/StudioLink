@@ -33,7 +33,12 @@ func TestValidate(t *testing.T) {
 		{name: "named interface", cfg: Config{Token: token, Listen: []string{"100.64.0.7:1"}}},
 		{name: "wildcard allowed", cfg: Config{Token: token, Listen: []string{"0.0.0.0:1"}, AllowAllInterfaces: true}},
 		{name: "short token", cfg: Config{Token: "abc", Listen: []string{"127.0.0.1:1"}}, wantErr: "token"},
-		{name: "no listen", cfg: Config{Token: token}, wantErr: "at least one"},
+		{name: "nothing to serve on", cfg: Config{Token: token}, wantErr: "nothing to serve on"},
+		{name: "interface only", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Name: "Tailscale", Port: 1}}}},
+		{name: "tailscale only", cfg: Config{Token: token, Tailscale: &Tailscale{}}},
+		{name: "interface without name", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Port: 1}}}, wantErr: "needs a name"},
+		{name: "interface bad port", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Name: "x", Port: 70000}}}, wantErr: "port must be"},
+		{name: "tailscale bad port", cfg: Config{Token: token, Tailscale: &Tailscale{Port: -1}}, wantErr: "tailscale.port"},
 		{name: "wildcard v4", cfg: Config{Token: token, Listen: []string{"0.0.0.0:1"}}, wantErr: "every network interface"},
 		{name: "wildcard v6", cfg: Config{Token: token, Listen: []string{"[::]:1"}}, wantErr: "every network interface"},
 		{name: "empty host", cfg: Config{Token: token, Listen: []string{":1"}}, wantErr: "IP address"},
@@ -67,5 +72,20 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if got.Token != c.Token || got.Listen[0] != c.Listen[0] || got.AllowedOrigins[0] != c.AllowedOrigins[0] {
 		t.Errorf("round trip mismatch: got %+v, want %+v", got, c)
+	}
+}
+
+func TestTailscaleDefaults(t *testing.T) {
+	ts := &Tailscale{}
+	if ts.DeviceName() != "studiolink" || ts.ListenPort() != 80 {
+		t.Errorf("defaults = %q:%d", ts.DeviceName(), ts.ListenPort())
+	}
+	ts.HTTPS = true
+	if ts.ListenPort() != 443 {
+		t.Errorf("HTTPS port = %d, want 443", ts.ListenPort())
+	}
+	ts.Port, ts.Hostname = 8080, "box"
+	if ts.DeviceName() != "box" || ts.ListenPort() != 8080 {
+		t.Errorf("explicit = %q:%d", ts.DeviceName(), ts.ListenPort())
 	}
 }

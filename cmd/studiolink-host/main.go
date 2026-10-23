@@ -15,14 +15,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"studiolink/internal/config"
 	"studiolink/internal/hostserver"
+	"studiolink/internal/netif"
 	"studiolink/internal/proc"
 	"studiolink/internal/studio"
+	"studiolink/internal/tailnet"
 	"studiolink/internal/version"
 )
 
@@ -32,11 +38,12 @@ Usage:
   studiolink-host <command> [flags]
 
 Commands:
-  init      create the config file with a new token
-  serve     run the bridge
-  token     print the token clients must send
-  doctor    check that this machine can run the bridge
-  version   print the version
+  init        create the config file with a new token
+  serve       run the bridge
+  token       print the token clients must send
+  doctor      check that this machine can run the bridge
+  interfaces  list network adapters the bridge can serve on
+  version     print the version
 
 Run "studiolink-host <command> -h" for a command's flags.
 `
@@ -61,6 +68,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runServe(rest, stderr)
 	case "token":
 		return runToken(rest, stdout, stderr)
+	case "interfaces":
+		return runInterfaces(rest, stdout, stderr)
 	case "doctor":
 		return runDoctor(rest, stdout, stderr)
 	case "help", "-h", "--help":
@@ -139,7 +148,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "FAIL config: %v\n", err)
 		failed = true
 	} else {
-		fmt.Fprintf(stdout, "ok   config: %s (listen %s)\n", *path, strings.Join(cfg.Listen, ", "))
+		fmt.Fprintf(stdout, "ok   config: %s (serves on %s)\n", *path, describeListen(cfg))
 	}
 	if failed {
 		return 1
@@ -194,7 +203,8 @@ func runServe(args []string, stderr io.Writer) int {
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	errs := make(chan error, len(cfg.Listen))
+	// Fixed addresses must bind now; adapters and the tailnet may come later.
+	errs := make(chan error, len(cfg.Listen)+1)
 	for _, addr := range cfg.Listen {
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
@@ -204,20 +214,119 @@ func runServe(args []string, stderr io.Writer) int {
 		log.Info("listening", "url", "http://"+ln.Addr().String()+"/mcp")
 		go func() { errs <- httpSrv.Serve(ln) }()
 	}
-	log.Info("studiolink-host ready", "version", version.Version, "launcher", launcher)
 
 	// Ctrl+C, and on Windows closing the console window, arrive here.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	var background sync.WaitGroup
+	if len(cfg.ListenInterfaces) > 0 {
+		w := &netif.Watcher{
+			Specs: cfg.ListenInterfaces,
+			Log:   log,
+			// Serve returns when the watcher closes a listener; that is expected.
+			Serve: func(ln net.Listener) { _ = httpSrv.Serve(ln) },
+		}
+		background.Go(func() { w.Run(ctx) })
+	}
+
+	var tailSrv *http.Server
+	if ts := cfg.Tailscale; ts != nil {
+		stateDir := ts.StateDir
+		if stateDir == "" {
+			// Next to the config, wherever serve was started from.
+			abs, err := filepath.Abs(*path)
+			if err != nil {
+				log.Error("cannot resolve config path", "err", err)
+				return 1
+			}
+			stateDir = filepath.Join(filepath.Dir(abs), "tsnet")
+		}
+		node, err := tailnet.New(ts, stateDir, log.With("tailnet", ts.DeviceName()))
+		if err != nil {
+			log.Error("cannot start tailnet device", "err", err)
+			return 1
+		}
+		defer node.Close()
+		tailSrv = &http.Server{
+			Handler:           node.IdentifyPeers(srv.Handler(), hostserver.WithPeer),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		background.Go(func() {
+			ln, url, err := node.Up(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					errs <- err
+				}
+				return
+			}
+			log.Info("listening on tailnet", "url", url)
+			if err := tailSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+				errs <- err
+			}
+		})
+	}
+	log.Info("studiolink-host ready", "version", version.Version, "launcher", launcher)
+
 	select {
 	case <-ctx.Done():
 		log.Info("shutting down")
 	case err := <-errs:
 		log.Error("server stopped", "err", err)
+		stop()
 	}
 	srv.Close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+	if tailSrv != nil {
+		_ = tailSrv.Shutdown(shutdownCtx)
+	}
+	background.Wait()
 	return 0
+}
+
+func runInterfaces(args []string, stdout, stderr io.Writer) int {
+	fset := flag.NewFlagSet("studiolink-host interfaces", flag.ContinueOnError)
+	fset.SetOutput(stderr)
+	if fset.Parse(args) != nil {
+		return 2
+	}
+	adapters, err := netif.List()
+	if err != nil {
+		fmt.Fprintf(stderr, "interfaces: %v\n", err)
+		return 1
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ADAPTER\tIPv4\tSTATE\tREACHED BY")
+	for _, a := range adapters {
+		var ips []string
+		for _, ip := range a.IPv4 {
+			ips = append(ips, ip.String())
+		}
+		state := "up"
+		if !a.Up {
+			state = "down"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.Name, strings.Join(ips, ", "), state, a.Kind())
+	}
+	_ = tw.Flush()
+	fmt.Fprintf(stdout, "\nTo serve on an adapter, add it to studiolink.json by name; the bridge\n"+
+		"follows its address when it changes:\n\n"+
+		"  \"listen_interfaces\": [{\"name\": \"vEthernet (WSL (Hyper-V firewall))\", \"port\": %d}]\n\n"+
+		"Windows Firewall may block other machines until you allow studiolink-host.\n"+
+		"For Tailscale peers, prefer the \"tailscale\" setting: it needs no firewall rule.\n", config.DefaultPort)
+	return 0
+}
+
+// describeListen summarizes where a config serves, for status output.
+func describeListen(cfg *config.Config) string {
+	parts := slices.Clone(cfg.Listen)
+	for _, li := range cfg.ListenInterfaces {
+		parts = append(parts, fmt.Sprintf("adapter %q port %d", li.Name, li.Port))
+	}
+	if ts := cfg.Tailscale; ts != nil {
+		parts = append(parts, fmt.Sprintf("tailnet device %q port %d", ts.DeviceName(), ts.ListenPort()))
+	}
+	return strings.Join(parts, ", ")
 }

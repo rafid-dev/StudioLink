@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"path/filepath"
+
 	"strings"
+	"studiolink/internal/config"
 	"testing"
 )
 
@@ -18,6 +20,7 @@ func TestRun(t *testing.T) {
 		{name: "no args", args: nil, wantCode: 2, wantStderr: "Usage:"},
 		{name: "version", args: []string{"version"}, wantCode: 0, wantStdout: "studiolink-host dev (protocol 1)"},
 		{name: "help", args: []string{"--help"}, wantCode: 0, wantStdout: "Commands:"},
+		{name: "interfaces", args: []string{"interfaces"}, wantCode: 0, wantStdout: "listen_interfaces"},
 		{name: "unknown", args: []string{"nope"}, wantCode: 2, wantStderr: `unknown command "nope"`},
 	}
 	for _, tt := range tests {
@@ -65,5 +68,19 @@ func TestTokenWithoutConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 	if code := run([]string{"token", "-config", path}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "run studiolink-host init") {
 		t.Errorf("token without config: %d %q", code, stderr.String())
+	}
+}
+
+func TestDescribeListen(t *testing.T) {
+	cfg := &config.Config{
+		Listen:           []string{"127.0.0.1:44770"},
+		ListenInterfaces: []config.InterfaceListen{{Name: "WSL", Port: 44770}},
+		Tailscale:        &config.Tailscale{},
+	}
+	got := describeListen(cfg)
+	for _, want := range []string{"127.0.0.1:44770", `adapter "WSL" port 44770`, `tailnet device "studiolink" port 80`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("describeListen = %q, want it to mention %q", got, want)
+		}
 	}
 }

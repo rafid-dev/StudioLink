@@ -30,6 +30,12 @@ type Config struct {
 	Token string `json:"token"`
 	// Listen is the list of host:port addresses to serve on.
 	Listen []string `json:"listen"`
+	// ListenInterfaces serves on network adapters by name, following their
+	// IPv4 addresses as they come and go (WSL and Hyper-V adapters change
+	// address on reboot, and the WSL adapter only exists while WSL runs).
+	ListenInterfaces []InterfaceListen `json:"listen_interfaces,omitempty"`
+	// Tailscale, when set, also serves on the tailnet as its own device.
+	Tailscale *Tailscale `json:"tailscale,omitempty"`
 	// AllowAllInterfaces permits wildcard addresses such as 0.0.0.0:PORT.
 	AllowAllInterfaces bool `json:"allow_all_interfaces,omitempty"`
 	// AllowedOrigins lists browser origins that may call the server. Requests
@@ -39,6 +45,50 @@ type Config struct {
 	MaxSessions int `json:"max_sessions,omitempty"`
 	// IdleTimeoutMinutes closes sessions with no requests for this long.
 	IdleTimeoutMinutes int `json:"idle_timeout_minutes,omitempty"`
+}
+
+// InterfaceListen serves on every IPv4 address of one network adapter.
+type InterfaceListen struct {
+	// Name is the adapter name as `studiolink-host interfaces` prints it
+	// (case-insensitive), for example "vEthernet (Default Switch)".
+	Name string `json:"name"`
+	Port int    `json:"port"`
+}
+
+// Tailscale configures the embedded tailnet device (tsnet).
+type Tailscale struct {
+	// Hostname is the device name on the tailnet. Defaults to "studiolink".
+	Hostname string `json:"hostname,omitempty"`
+	// Port defaults to 80, or 443 with HTTPS.
+	Port int `json:"port,omitempty"`
+	// HTTPS serves TLS with the tailnet's certificate. Needs HTTPS
+	// certificates enabled in the Tailscale admin console.
+	HTTPS bool `json:"https,omitempty"`
+	// StateDir holds the device's identity. Defaults to a "tsnet" folder
+	// next to the config file.
+	StateDir string `json:"state_dir,omitempty"`
+	// Ephemeral removes the device from the tailnet when the bridge stops.
+	Ephemeral bool `json:"ephemeral,omitempty"`
+}
+
+// DeviceName returns Hostname or its default.
+func (t *Tailscale) DeviceName() string {
+	if t.Hostname == "" {
+		return "studiolink"
+	}
+	return t.Hostname
+}
+
+// ListenPort returns Port or its default.
+func (t *Tailscale) ListenPort() int {
+	switch {
+	case t.Port != 0:
+		return t.Port
+	case t.HTTPS:
+		return 443
+	default:
+		return 80
+	}
 }
 
 // Default returns a loopback-only config with a fresh token.
@@ -109,8 +159,21 @@ func (c *Config) Validate() error {
 	if len(c.Token) < minTokenLen {
 		return fmt.Errorf("token must be at least %d characters (run studiolink-host init)", minTokenLen)
 	}
-	if len(c.Listen) == 0 {
-		return errors.New("listen must name at least one host:port")
+	if len(c.Listen) == 0 && len(c.ListenInterfaces) == 0 && c.Tailscale == nil {
+		return errors.New("nothing to serve on: set listen, listen_interfaces or tailscale")
+	}
+	for _, li := range c.ListenInterfaces {
+		if li.Name == "" {
+			return errors.New("listen_interfaces entry needs a name")
+		}
+		if li.Port < 1 || li.Port > 65535 {
+			return fmt.Errorf("listen_interfaces %q: port must be 1-65535", li.Name)
+		}
+	}
+	if t := c.Tailscale; t != nil {
+		if t.Port < 0 || t.Port > 65535 {
+			return errors.New("tailscale.port must be 1-65535")
+		}
 	}
 	for _, addr := range c.Listen {
 		host, port, err := net.SplitHostPort(addr)

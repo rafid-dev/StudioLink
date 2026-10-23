@@ -8,6 +8,7 @@ coverage.*
 
 # Local StudioLink config and secrets (tokens, TLS keys)
 studiolink.json
+tsnet/
 *.token
 *.key
 *.pem

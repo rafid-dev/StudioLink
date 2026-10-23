@@ -336,7 +336,11 @@ func (s *Server) newSession(r *http.Request) (*session, error) {
 	id := newSessionID()
 	sess := newSession(id, p, s.log.With("session", id[:8]))
 	s.sessions[id] = sess
-	sess.log.Info("session opened", "remote", r.RemoteAddr, "sessions", len(s.sessions))
+	attrs := []any{"remote", r.RemoteAddr, "sessions", len(s.sessions)}
+	if peer := peerFrom(r.Context()); peer != "" {
+		attrs = append(attrs, "peer", peer)
+	}
+	sess.log.Info("session opened", attrs...)
 	go func() {
 		<-sess.closed
 		s.mu.Lock()
