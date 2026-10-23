@@ -49,7 +49,10 @@ multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
 3. Interfaces (done): adapter binding by name that follows address changes,
    `interfaces` command, Tailscale via `tsnet` with peer identity in the log.
    Verified against live Studio from WSL2 and over the tailnet.
-4. studiolink-client stdio shim.
+4. studiolink-client stdio shim (done): `connect` forwards stdio to the
+   bridge (concurrent calls, SSE, server messages via GET, batch splitting,
+   DELETE on exit); `check` probes a bridge. Verified against live Studio
+   from WSL2 and from MCP Inspector in Docker.
 5. Dial-out mode: TLS WebSocket + yamux tunnel.
 6. Hardening: tool filtering, audit log, Windows service and tray, status.
 7. Packaging: release binaries, client Docker image, per-scenario guides,

@@ -2,7 +2,6 @@ package hostserver
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,93 +12,18 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"studiolink/internal/mcptest"
 )
 
 const testToken = "test-token-0123456789abcdef0123456789"
-
-// fakeProc is an in-memory stand-in for StudioMCP. It answers initialize,
-// echoes other requests, and has tools that exercise the bridge:
-// "notify" sends a notification before its result, "slow" answers late,
-// "crash" exits without answering.
-type fakeProc struct {
-	inR, outR, errR *io.PipeReader
-	inW, outW, errW *io.PipeWriter
-	done            chan struct{}
-	once            sync.Once
-	slow            time.Duration
-}
-
-func newFakeProc(slow time.Duration) *fakeProc {
-	p := &fakeProc{done: make(chan struct{}), slow: slow}
-	p.inR, p.inW = io.Pipe()
-	p.outR, p.outW = io.Pipe()
-	p.errR, p.errW = io.Pipe()
-	go p.serve()
-	return p
-}
-
-func (p *fakeProc) Stdin() io.WriteCloser { return p.inW }
-func (p *fakeProc) Stdout() io.Reader     { return p.outR }
-func (p *fakeProc) Stderr() io.Reader     { return p.errR }
-func (p *fakeProc) Done() <-chan struct{} { return p.done }
-func (p *fakeProc) Kill() error {
-	p.once.Do(func() {
-		close(p.done)
-		p.inR.Close()
-		p.outW.Close()
-		p.errW.Close()
-	})
-	return nil
-}
-
-func (p *fakeProc) write(v any) {
-	b, _ := json.Marshal(v)
-	_, _ = p.outW.Write(append(b, '\n'))
-}
-
-func (p *fakeProc) serve() {
-	sc := bufio.NewScanner(p.inR)
-	for sc.Scan() {
-		var m struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Params struct {
-				Name string `json:"name"`
-			} `json:"params"`
-		}
-		if json.Unmarshal(sc.Bytes(), &m) != nil {
-			fmt.Fprintln(p.errW, "bad line:", sc.Text())
-			continue
-		}
-		if len(m.ID) == 0 || m.Method == "" {
-			continue // notification or response
-		}
-		reply := func(result any) {
-			p.write(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
-		}
-		switch {
-		case m.Method == "initialize":
-			reply(map[string]any{"protocolVersion": "2025-06-18", "serverInfo": map[string]string{"name": "fake"}})
-		case m.Params.Name == "notify":
-			p.write(map[string]any{"jsonrpc": "2.0", "method": "notifications/message", "params": map[string]string{"data": "hi"}})
-			reply("notified")
-		case m.Params.Name == "slow":
-			go func() { time.Sleep(p.slow); reply("slow done") }()
-		case m.Params.Name == "crash":
-			p.Kill()
-			return
-		default:
-			reply(map[string]string{"echo": m.Method})
-		}
-	}
-}
 
 type harness struct {
 	t      *testing.T
 	srv    *Server
 	http   *httptest.Server
 	mu     sync.Mutex
-	procs  []*fakeProc
+	procs  []*mcptest.FakeProc
 	spawns atomic.Int32
 }
 
@@ -111,7 +35,7 @@ func newHarness(t *testing.T, mod func(*Options)) *harness {
 		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Spawn: func() (Process, error) {
 			h.spawns.Add(1)
-			p := newFakeProc(300 * time.Millisecond)
+			p := mcptest.NewFakeProc(300 * time.Millisecond)
 			h.mu.Lock()
 			h.procs = append(h.procs, p)
 			h.mu.Unlock()
@@ -367,10 +291,10 @@ func TestCloseKillsEverySession(t *testing.T) {
 	}
 }
 
-func waitClosed(t *testing.T, p *fakeProc) {
+func waitClosed(t *testing.T, p *mcptest.FakeProc) {
 	t.Helper()
 	select {
-	case <-p.done:
+	case <-p.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("process was not killed")
 	}

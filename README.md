@@ -4,8 +4,9 @@ Lets AI agents in VMs, Docker containers, on Tailscale peers or on external
 servers use Roblox Studio's MCP server, which normally only works on the
 Windows machine running Studio.
 
-**Status:** phase 3. Agents in local Docker containers, WSL2 and local VMs,
-and on Tailscale peers can connect over HTTP with a token. See
+**Status:** phase 4. Agents in local Docker containers, WSL2 and local VMs,
+and on Tailscale peers can connect over HTTP with a token, directly or through
+`studiolink-client` for agents that only run stdio MCP servers. See
 [docs/design.md](docs/design.md) for the architecture and roadmap.
 
 ## Quick start (Docker on this PC)
@@ -27,6 +28,26 @@ claude mcp add --transport http Roblox_Studio http://host.docker.internal:44770/
 
 Clients may send the token as `Authorization: Bearer <token>` or
 `X-MCP-Auth: <token>`.
+
+## Agents that only run stdio MCP servers
+`studiolink-client` runs next to the agent (Linux, macOS or Windows) and
+gives it an ordinary stdio MCP server that forwards to the bridge:
+
+```bash
+GOOS=linux go build -o studiolink-client ./cmd/studiolink-client   # on the dev machine
+
+export STUDIOLINK_URL=http://host.docker.internal:44770/mcp
+export STUDIOLINK_TOKEN=<token>          # or pass -token-file PATH
+studiolink-client check                  # ok ... RobloxStudio 1.0.0, MCP 2025-06-18, 28 tools
+
+claude mcp add Roblox_Studio -e STUDIOLINK_URL=$STUDIOLINK_URL -e STUDIOLINK_TOKEN=$STUDIOLINK_TOKEN -- studiolink-client connect
+```
+
+There is no `-token` flag, because command lines are visible to other
+processes. When the agent stops, the client ends its session on the bridge,
+so Studio MCP processes don't linger until the idle timeout. It warns if the
+token would cross the internet unencrypted (plain `http://` to a public
+address).
 
 ## WSL2 and local VMs
 `studiolink-host interfaces` lists this PC's network adapters and what each
