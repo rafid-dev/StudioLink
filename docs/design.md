@@ -44,7 +44,8 @@ multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
 
 ## Phases
 1. Scaffold (done): Go module, CLI skeleton, `doctor`, lint and test setup.
-2. Listen mode: Streamable HTTP, process per session, Job Objects, token auth.
+2. Listen mode (done): Streamable HTTP, process per session, Job Objects,
+   token auth. Verified from Docker with MCP Inspector against live Studio.
 3. Interfaces: VM adapter binding, Tailscale via `tsnet`.
 4. studiolink-client stdio shim.
 5. Dial-out mode: TLS WebSocket + yamux tunnel.

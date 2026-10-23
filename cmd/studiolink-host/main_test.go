@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -32,5 +33,37 @@ func TestRun(t *testing.T) {
 				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantStderr)
 			}
 		})
+	}
+}
+
+func TestInitThenToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "studiolink.json")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init", "-config", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("init: %d %s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "Bearer ") && !strings.Contains(stdout.String(), "<token>") {
+		t.Error("init printed the token; it should print a placeholder")
+	}
+
+	stdout.Reset()
+	if code := run([]string{"token", "-config", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("token: %d %s", code, stderr.String())
+	}
+	if len(strings.TrimSpace(stdout.String())) < 32 {
+		t.Errorf("token too short: %q", stdout.String())
+	}
+
+	stderr.Reset()
+	if code := run([]string{"init", "-config", path}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "already exists") {
+		t.Errorf("second init without -force: %d %q", code, stderr.String())
+	}
+}
+
+func TestTokenWithoutConfig(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	path := filepath.Join(t.TempDir(), "missing.json")
+	if code := run([]string{"token", "-config", path}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "run studiolink-host init") {
+		t.Errorf("token without config: %d %q", code, stderr.String())
 	}
 }

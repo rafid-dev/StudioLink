@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"studiolink/internal/proc"
 )
 
 // LauncherName is the script Roblox installs under %LOCALAPPDATA%\Roblox.
@@ -25,6 +27,21 @@ func LauncherPath(getenv func(string) string) (string, error) {
 		return "", ErrNoLocalAppData
 	}
 	return filepath.Join(dir, "Roblox", LauncherName), nil
+}
+
+// Spec returns how to start Studio MCP in stdio mode through launcher (the
+// path of mcp.bat). Batch files run under cmd.exe; /s strips the outer
+// quotes so a launcher path with spaces survives.
+func Spec(launcher string) proc.Spec {
+	comspec := os.Getenv("ComSpec")
+	if comspec == "" {
+		comspec = `C:\Windows\System32\cmd.exe`
+	}
+	return proc.Spec{
+		Path:    comspec,
+		CmdLine: fmt.Sprintf(`cmd.exe /d /s /c ""%s" --stdio"`, launcher),
+		Dir:     filepath.Dir(launcher),
+	}
 }
 
 // FindLauncher returns the path of mcp.bat and checks that it exists.
