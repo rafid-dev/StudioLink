@@ -4,9 +4,10 @@ Lets AI agents in VMs, Docker containers, on Tailscale peers or on external
 servers use Roblox Studio's MCP server, which normally only works on the
 Windows machine running Studio.
 
-**Status:** phase 4. Agents in local Docker containers, WSL2 and local VMs,
+**Status:** phase 5. Agents in local Docker containers, WSL2 and local VMs,
 and on Tailscale peers can connect over HTTP with a token, directly or through
-`studiolink-client` for agents that only run stdio MCP servers. See
+`studiolink-client` for agents that only run stdio MCP servers. Agents on
+external servers connect through a relay that the Studio PC dials out to. See
 [docs/design.md](docs/design.md) for the architecture and roadmap.
 
 ## Quick start (Docker on this PC)
@@ -77,6 +78,39 @@ set `TS_AUTHKEY` in the environment). Peers then connect to
 `http://studiolink.<tailnet>.ts.net/mcp` with the token, and the log names the
 tailnet user and device behind each session.
 
+## External servers (dial-out)
+For an agent on a VPS or cloud machine, the Studio PC needs no open port: it
+dials out to a relay on the server over TLS, and agents there connect to the
+relay locally. On the server, run the relay with the same token:
+
+```bash
+export STUDIOLINK_TOKEN=<token>          # or pass -token-file PATH
+studiolink-client relay                  # leave running; tunnel on :44771, agents on 127.0.0.1:44770
+```
+
+On first start it makes a self-signed certificate (kept in
+`~/.config/StudioLink`) and prints the `relays` entry for the Studio PC,
+including the certificate's fingerprint; `studiolink-client fingerprint`
+prints it again. Add it to `studiolink.json` and restart `serve`:
+
+```json
+"relays": [{"url": "wss://vps.example.com:44771", "fingerprint": "sha256:..."}]
+```
+
+Port 44771 must be open on the server. Agents on the server then use
+`http://127.0.0.1:44770/mcp` with the token, directly or through
+`studiolink-client connect`. `GET /healthz` on the relay says whether the
+Studio PC is connected.
+
+The host only connects to a relay whose certificate matches the fingerprint,
+so it never sends the token to anything else. With a domain and a
+certificate from a public CA, pass `-cert` and `-key` to the relay (renewals
+are picked up without a restart) and leave out the fingerprint. Behind a
+TLS-terminating reverse proxy on the same server, use
+`-plain-tunnel -tunnel-listen 127.0.0.1:44771` and proxy WebSocket upgrades on
+`/tunnel` to it. The host reconnects with backoff (1 s to 1 min) when the
+tunnel drops; a relay serves one Studio PC at a time.
+
 ## How it behaves
 - Each MCP session gets its own StudioMCP process, inside a Windows Job
   Object. Ending the session, an idle timeout (30 min) or the bridge crashing
@@ -96,6 +130,8 @@ tailnet user and device behind each session.
 | `tailscale.https` | `false` | Serve HTTPS with the tailnet's certificate (enable HTTPS certificates in the Tailscale admin console first) |
 | `tailscale.ephemeral` | `false` | Remove the device from the tailnet when the bridge stops |
 | `tailscale.state_dir` | `tsnet` next to the config | The device's identity; keep it private |
+| `relays[].url` | none | Relay to dial out to: `wss://host:44771` (`ws://` only to loopback) |
+| `relays[].fingerprint` | none | The relay certificate's `sha256:` fingerprint; leave out for a certificate from a public CA |
 | `allow_all_interfaces` | `false` | Permit wildcard listen addresses |
 | `allowed_origins` | none | Browser origins allowed to call the bridge |
 | `max_sessions` | `16` | Concurrent sessions (StudioMCP processes) |

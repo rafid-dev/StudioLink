@@ -76,9 +76,10 @@ func TestDescribeListen(t *testing.T) {
 		Listen:           []string{"127.0.0.1:44770"},
 		ListenInterfaces: []config.InterfaceListen{{Name: "WSL", Port: 44770}},
 		Tailscale:        &config.Tailscale{},
+		Relays:           []config.Relay{{URL: "wss://vps.example.com:44771"}},
 	}
 	got := describeListen(cfg)
-	for _, want := range []string{"127.0.0.1:44770", `adapter "WSL" port 44770`, `tailnet device "studiolink" port 80`} {
+	for _, want := range []string{"127.0.0.1:44770", `adapter "WSL" port 44770`, `tailnet device "studiolink" port 80`, "relay wss://vps.example.com:44771/tunnel"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("describeListen = %q, want it to mention %q", got, want)
 		}

@@ -29,6 +29,7 @@ import (
 	"studiolink/internal/proc"
 	"studiolink/internal/studio"
 	"studiolink/internal/tailnet"
+	"studiolink/internal/tunnel"
 	"studiolink/internal/version"
 )
 
@@ -266,6 +267,17 @@ func runServe(args []string, stderr io.Writer) int {
 			}
 		})
 	}
+	for _, relay := range cfg.Relays {
+		d := &tunnel.Dialer{
+			URL:         relay.TunnelURL(),
+			Fingerprint: relay.Fingerprint,
+			Token:       cfg.Token,
+			Log:         log,
+			// Serve returns when the tunnel drops; the dialer reconnects.
+			Serve: func(ln net.Listener) { _ = httpSrv.Serve(ln) },
+		}
+		background.Go(func() { d.Run(ctx) })
+	}
 	log.Info("studiolink-host ready", "version", version.Version, "launcher", launcher)
 
 	select {
@@ -327,6 +339,9 @@ func describeListen(cfg *config.Config) string {
 	}
 	if ts := cfg.Tailscale; ts != nil {
 		parts = append(parts, fmt.Sprintf("tailnet device %q port %d", ts.DeviceName(), ts.ListenPort()))
+	}
+	for _, r := range cfg.Relays {
+		parts = append(parts, "relay "+r.TunnelURL())
 	}
 	return strings.Join(parts, ", ")
 }

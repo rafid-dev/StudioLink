@@ -36,6 +36,11 @@ func TestValidate(t *testing.T) {
 		{name: "nothing to serve on", cfg: Config{Token: token}, wantErr: "nothing to serve on"},
 		{name: "interface only", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Name: "Tailscale", Port: 1}}}},
 		{name: "tailscale only", cfg: Config{Token: token, Tailscale: &Tailscale{}}},
+		{name: "relay only", cfg: Config{Token: token, Relays: []Relay{{URL: "wss://vps.example.com:44771", Fingerprint: "sha256:" + strings.Repeat("ab", 32)}}}},
+		{name: "relay ws loopback", cfg: Config{Token: token, Relays: []Relay{{URL: "ws://127.0.0.1:8080/tunnel"}}}},
+		{name: "relay ws remote", cfg: Config{Token: token, Relays: []Relay{{URL: "ws://vps.example.com:44771"}}}, wantErr: "use wss://"},
+		{name: "relay https scheme", cfg: Config{Token: token, Relays: []Relay{{URL: "https://vps.example.com"}}}, wantErr: "want wss://"},
+		{name: "relay bad fingerprint", cfg: Config{Token: token, Relays: []Relay{{URL: "wss://vps.example.com", Fingerprint: "abc"}}}, wantErr: "fingerprint"},
 		{name: "interface without name", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Port: 1}}}, wantErr: "needs a name"},
 		{name: "interface bad port", cfg: Config{Token: token, ListenInterfaces: []InterfaceListen{{Name: "x", Port: 70000}}}, wantErr: "port must be"},
 		{name: "tailscale bad port", cfg: Config{Token: token, Tailscale: &Tailscale{Port: -1}}, wantErr: "tailscale.port"},
@@ -87,5 +92,18 @@ func TestTailscaleDefaults(t *testing.T) {
 	ts.Port, ts.Hostname = 8080, "box"
 	if ts.DeviceName() != "box" || ts.ListenPort() != 8080 {
 		t.Errorf("explicit = %q:%d", ts.DeviceName(), ts.ListenPort())
+	}
+}
+
+func TestRelayTunnelURL(t *testing.T) {
+	cases := map[string]string{
+		"wss://vps.example.com:44771":         "wss://vps.example.com:44771/tunnel",
+		"wss://vps.example.com:44771/":        "wss://vps.example.com:44771/tunnel",
+		"wss://proxy.example.com/studiolink/": "wss://proxy.example.com/studiolink/",
+	}
+	for in, want := range cases {
+		if got := (Relay{URL: in}).TunnelURL(); got != want {
+			t.Errorf("TunnelURL(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

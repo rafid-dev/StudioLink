@@ -30,7 +30,7 @@ StudioMCP.exe ⇄ Roblox Studio
 | Tailscale | Listen (`tsnet`) | Its own tailnet node | `http://<node>.<tailnet>.ts.net/mcp` |
 | External server | Dial-out | Nothing | `127.0.0.1:PORT` on the server |
 
-Dial-out: studiolink-host opens one outbound TLS WebSocket to studiolink-client and
+Dial-out: studiolink-host opens one outbound TLS WebSocket to `studiolink-client relay` and
 multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
 
 ## Security
@@ -53,7 +53,12 @@ multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
    bridge (concurrent calls, SSE, server messages via GET, batch splitting,
    DELETE on exit); `check` probes a bridge. Verified against live Studio
    from WSL2 and from MCP Inspector in Docker.
-5. Dial-out mode: TLS WebSocket + yamux tunnel.
+5. Dial-out mode (done): the host dials `studiolink-client relay` over a TLS
+   WebSocket (certificate pinned by fingerprint, or a public CA) and serves
+   yamux streams with the normal bridge handler; the relay forwards agents'
+   HTTP through it. Reconnects with backoff. Verified against live Studio
+   with the relay in Docker (probe, Inspector tool call, relay restart, wrong
+   certificate refused).
 6. Hardening: tool filtering, audit log, Windows service and tray, status.
 7. Packaging: release binaries, client Docker image, per-scenario guides,
    migration configs for Yeetback and Prison Wars.

@@ -26,6 +26,8 @@ func TestRun(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte(testToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stateDir := map[string]string{"STUDIOLINK_STATE_DIR": t.TempDir()}
+	withToken := map[string]string{"STUDIOLINK_TOKEN": testToken}
 	tests := []struct {
 		name       string
 		args       []string
@@ -48,6 +50,11 @@ func TestRun(t *testing.T) {
 			env:      map[string]string{"STUDIOLINK_URL": "http://127.0.0.1:1"},
 			wantCode: 1, wantStderr: "FAIL http://127.0.0.1:1/mcp",
 		},
+		{name: "fingerprint", args: []string{"fingerprint"}, env: stateDir, wantStdout: "sha256:"},
+		{name: "relay no token", args: []string{"relay"}, wantCode: 2, wantStderr: "no token"},
+		{name: "relay cert without key", args: []string{"relay", "-cert", "c.pem"}, env: withToken, wantCode: 2, wantStderr: "-cert and -key go together"},
+		{name: "relay plain tunnel in public", args: []string{"relay", "-plain-tunnel"}, env: withToken, wantCode: 2, wantStderr: "loopback -tunnel-listen"},
+		{name: "relay bad cert", args: []string{"relay", "-cert", "nope.pem", "-key", "nope.pem"}, env: withToken, wantCode: 1, wantStderr: "cannot load the TLS certificate"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

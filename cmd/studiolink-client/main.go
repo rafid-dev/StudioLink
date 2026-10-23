@@ -28,14 +28,19 @@ Usage:
   studiolink-client <command> [flags]
 
 Commands:
-  connect   be a stdio MCP server that forwards to studiolink-host
-            (this is the command to give your agent)
-  check     test the connection and print what the bridge offers
-  version   print the version
+  connect      be a stdio MCP server that forwards to studiolink-host
+               (this is the command to give your agent)
+  check        test the connection and print what the bridge offers
+  relay        on a server the Studio PC can reach: accept studiolink-host's
+               tunnel and serve agents on this server (dial-out mode)
+  fingerprint  print the relay certificate's fingerprint for studiolink.json
+  version      print the version
 
 Both connect and check take:
   -url URL          the bridge's /mcp URL (or STUDIOLINK_URL)
   -token-file PATH  file holding the token (or STUDIOLINK_TOKEN)
+
+Run "studiolink-client relay -h" for the relay's flags.
 
 Example, Claude Code in a container:
   claude mcp add Roblox_Studio -e STUDIOLINK_TOKEN=<token> -- \
@@ -56,6 +61,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return runConnect(args[1:], stdin, stdout, stderr, getenv)
 	case "check":
 		return runCheck(args[1:], stdout, stderr, getenv)
+	case "relay":
+		return runRelay(args[1:], stdout, stderr, getenv)
+	case "fingerprint":
+		return runFingerprint(args[1:], stdout, stderr, getenv)
 	case "version":
 		fmt.Fprintf(stdout, "studiolink-client %s (protocol %d)\n", version.Version, version.ProtocolVersion)
 		return 0
@@ -95,16 +104,9 @@ func parseTarget(name string, args []string, stderr io.Writer, getenv func(strin
 	if u.Path == "" || u.Path == "/" {
 		u.Path = "/mcp"
 	}
-	token := strings.TrimSpace(getenv("STUDIOLINK_TOKEN"))
-	if *tokenFile != "" {
-		b, err := os.ReadFile(*tokenFile)
-		if err != nil {
-			return nil, nil, fmt.Errorf("token file: %w", err)
-		}
-		token = strings.TrimSpace(string(b))
-	}
-	if token == "" {
-		return nil, nil, errors.New("no token: set STUDIOLINK_TOKEN or pass -token-file (studiolink-host token prints it)")
+	token, err := readToken(*tokenFile, getenv)
+	if err != nil {
+		return nil, nil, err
 	}
 	return &target{url: u.String(), token: token}, verbose, nil
 }

@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
+
+	"studiolink/internal/tunnel"
 )
 
 // DefaultPort is studiolink-host's default listen port. It avoids 44755
@@ -36,6 +39,8 @@ type Config struct {
 	ListenInterfaces []InterfaceListen `json:"listen_interfaces,omitempty"`
 	// Tailscale, when set, also serves on the tailnet as its own device.
 	Tailscale *Tailscale `json:"tailscale,omitempty"`
+	// Relays are servers to dial out to (see Relay).
+	Relays []Relay `json:"relays,omitempty"`
 	// AllowAllInterfaces permits wildcard addresses such as 0.0.0.0:PORT.
 	AllowAllInterfaces bool `json:"allow_all_interfaces,omitempty"`
 	// AllowedOrigins lists browser origins that may call the server. Requests
@@ -89,6 +94,52 @@ func (t *Tailscale) ListenPort() int {
 	default:
 		return 80
 	}
+}
+
+// Relay is a server running `studiolink-client relay` that the host dials
+// out to, so agents there reach Studio without this PC accepting
+// connections (dial-out mode).
+type Relay struct {
+	// URL is the relay's tunnel address, for example
+	// wss://vps.example.com:44771. The /tunnel path is added if missing.
+	URL string `json:"url"`
+	// Fingerprint pins the relay's self-signed certificate, as printed by
+	// `studiolink-client relay`. Leave it out when the relay has a
+	// certificate from a public CA.
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// TunnelURL returns URL with the tunnel path filled in.
+func (r Relay) TunnelURL() string {
+	u, err := url.Parse(r.URL)
+	if err != nil {
+		return r.URL
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = tunnel.Path
+	}
+	return u.String()
+}
+
+func (r Relay) validate() error {
+	u, err := url.Parse(r.URL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("relay url %q: want wss://host:port", r.URL)
+	}
+	switch u.Scheme {
+	case "wss":
+	case "ws":
+		// Unencrypted only to this machine, e.g. a local reverse proxy.
+		if ip := net.ParseIP(u.Hostname()); u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("relay url %q: use wss:// (ws:// is only allowed to localhost)", r.URL)
+		}
+	default:
+		return fmt.Errorf("relay url %q: want wss://host:port", r.URL)
+	}
+	if r.Fingerprint != "" && !tunnel.ValidFingerprint(r.Fingerprint) {
+		return fmt.Errorf("relay %q: fingerprint must look like sha256:<64 hex digits>", r.URL)
+	}
+	return nil
 }
 
 // Default returns a loopback-only config with a fresh token.
@@ -159,8 +210,8 @@ func (c *Config) Validate() error {
 	if len(c.Token) < minTokenLen {
 		return fmt.Errorf("token must be at least %d characters (run studiolink-host init)", minTokenLen)
 	}
-	if len(c.Listen) == 0 && len(c.ListenInterfaces) == 0 && c.Tailscale == nil {
-		return errors.New("nothing to serve on: set listen, listen_interfaces or tailscale")
+	if len(c.Listen) == 0 && len(c.ListenInterfaces) == 0 && c.Tailscale == nil && len(c.Relays) == 0 {
+		return errors.New("nothing to serve on: set listen, listen_interfaces, tailscale or relays")
 	}
 	for _, li := range c.ListenInterfaces {
 		if li.Name == "" {
@@ -168,6 +219,11 @@ func (c *Config) Validate() error {
 		}
 		if li.Port < 1 || li.Port > 65535 {
 			return fmt.Errorf("listen_interfaces %q: port must be 1-65535", li.Name)
+		}
+	}
+	for _, r := range c.Relays {
+		if err := r.validate(); err != nil {
+			return err
 		}
 	}
 	if t := c.Tailscale; t != nil {
