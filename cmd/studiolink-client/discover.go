@@ -83,7 +83,8 @@ func inWSL(getenv func(string) string) bool {
 	return runtime.GOOS == "linux" && (getenv("WSL_DISTRO_NAME") != "" || getenv("WSL_INTEROP") != "")
 }
 
-func inContainer() bool {
+// inContainer is a var so tests behave the same inside a container.
+var inContainer = func() bool {
 	for _, f := range []string{"/.dockerenv", "/run/.containerenv"} {
 		if _, err := os.Stat(f); err == nil {
 			return true

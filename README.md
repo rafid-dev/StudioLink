@@ -15,7 +15,9 @@ the bridge runs from the notification area and can start at login. See
 ## Quick start
 On the Windows PC with Roblox Studio:
 
-1. Unzip `StudioLink-<version>-windows-amd64.zip` and double-click
+1. Download `StudioLink-<version>-windows-amd64.zip` from the
+   [latest release](https://github.com/rafid-dev/StudioLink/releases/latest),
+   unzip it and double-click
    `studiolink-host.exe`. Setup installs it to
    `%LOCALAPPDATA%\Programs\StudioLink`, puts it on your PATH, makes a config
    with a new token, offers WSL2 access and start at login, and starts the
@@ -62,7 +64,11 @@ from the bridge itself:
 curl -fsSL http://<bridge>:44770/install.sh | sh
 studiolink-client check                  # ok ... RobloxStudio 1.0.0, MCP 2025-06-18, 28 tools
 claude mcp add -s user Roblox_Studio -- studiolink-client connect
+codex mcp add Roblox_Studio -- studiolink-client connect   # Codex
 ```
+
+Release pages also have each client on its own
+(`studiolink-client-linux-amd64` and so on).
 
 With no flags, the client looks for the bridge on `host.docker.internal` in a
 container, on Windows' side of WSL2 (loopback, then the default gateway) and
@@ -227,6 +233,10 @@ go run ./cmd/studiolink-host doctor   # check that mcp.bat and the config are fo
 .\release.ps1 -Version v0.7.0         # dist\: host zips with every client, client binaries, SHA256SUMS
 docker build -t studiolink-client .   # the client image (runs the relay by default)
 ```
+
+CI runs `check.ps1` on Windows and the tests on Linux. Pushing a `v*` tag
+(`git tag v0.7.1; git push origin v0.7.1`) runs `release.ps1` on GitHub
+Actions and publishes the release.
 
 A `go build` of the host has no `clients` folder next to it, so it can't
 serve `/install.sh`; `connect` says how to build the client instead.

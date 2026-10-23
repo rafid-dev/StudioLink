@@ -17,9 +17,11 @@ import (
 	"studiolink/internal/tokenfile"
 )
 
-// TestMain keeps tests from finding a real bridge running on this machine.
+// TestMain keeps tests from finding a real bridge running on this machine,
+// and from acting differently when run in a container.
 func TestMain(m *testing.M) {
 	probeHealth = func(context.Context, string) bool { return false }
+	inContainer = func() bool { return false }
 	os.Exit(m.Run())
 }
 

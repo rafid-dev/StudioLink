@@ -146,9 +146,12 @@ func TestAuditLog(t *testing.T) {
 	h.do("POST", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_roblox_studios","arguments":{"x":1}}}`, withSession(sid), asReader())
 	h.do("POST", call(2, "execute_luau"), withSession(sid), asReader())
 	h.do("DELETE", "", withSession(sid), asReader())
+	// session_close is recorded once the session has shut down, after DELETE
+	// returns, so wait for it to keep the order fixed.
+	var events []audit.Event
+	waitFor(t, func() bool { return len(readAudit(t, path)) >= 4 })
 	h.do("POST", initBody, withHeader("Authorization", "Bearer wrong"))
 
-	var events []audit.Event
 	waitFor(t, func() bool {
 		events = readAudit(t, path)
 		return len(events) >= 5

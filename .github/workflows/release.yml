@@ -1,0 +1,45 @@
+name: Release
+
+# Push a tag to publish a release:
+#   git tag v0.7.0 && git push origin v0.7.0
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: check.ps1
+        shell: pwsh
+        run: .\check.ps1
+      - name: release.ps1
+        shell: pwsh
+        run: .\release.ps1 -Version $env:GITHUB_REF_NAME
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $notes = @"
+          **Studio PC (Windows):** download ``StudioLink-$tag-windows-amd64.zip``, unzip it and double-click ``studiolink-host.exe``. Then run ``studiolink-host connect`` for the commands for where your agent runs.
+
+          **Agent machines:** the host serves the client itself (``curl -fsSL http://<bridge>:44770/install.sh | sh``), or download ``studiolink-client-<os>-<arch>`` below. Linux:
+
+          ``````bash
+          curl -fsSLo studiolink-client https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/studiolink-client-linux-amd64
+          chmod +x studiolink-client && sudo mv studiolink-client /usr/local/bin/
+          ``````
+
+          Check downloads with ``sha256sum -c SHA256SUMS --ignore-missing``.
+          "@
+          gh release create $tag (Get-ChildItem dist -File).FullName --title "StudioLink $tag" --notes $notes --generate-notes

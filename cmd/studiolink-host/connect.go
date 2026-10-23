@@ -217,6 +217,7 @@ func (r *recipes) stdioSteps(base, who string) string {
   studiolink-client save -url %s/mcp
   (paste this token when it asks: %s)
   claude mcp add -s user Roblox_Studio -- studiolink-client connect
+  codex mcp add Roblox_Studio -- studiolink-client connect     (Codex)
 `, who, r.installLine(base), base, r.cfg.Token)
 }
 

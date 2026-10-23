@@ -27,4 +27,6 @@ func kill(p *Process) error {
 	return nil
 }
 
-func (p *Process) release() {}
+// release has nothing to free; it reads job so the Windows-only field
+// doesn't count as unused here.
+func (p *Process) release() { _ = p.job }
