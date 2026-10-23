@@ -230,3 +230,6 @@ docker build -t studiolink-client .   # the client image (runs the relay by defa
 
 A `go build` of the host has no `clients` folder next to it, so it can't
 serve `/install.sh`; `connect` says how to build the client instead.
+
+## License
+[MIT](LICENSE)
