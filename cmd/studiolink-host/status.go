@@ -51,8 +51,9 @@ type runFile struct {
 }
 
 type runInfo struct {
-	PID       int    `json:"pid"`
-	StatusURL string `json:"status_url"`
+	PID         int    `json:"pid"`
+	StatusURL   string `json:"status_url"`
+	SettingsURL string `json:"settings_url,omitempty"`
 }
 
 // runFilePath turns ...\studiolink.json into ...\studiolink.run.json.
@@ -88,11 +89,11 @@ func (info runInfo) alive() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func claimRunFile(path, statusURL string) (*runFile, error) {
+func claimRunFile(path, statusURL, settingsURL string) (*runFile, error) {
 	if info, err := readRunFile(path); err == nil && info.alive() {
 		return nil, fmt.Errorf("studiolink-host is already running with this config (pid %d); stop it first, or see it with studiolink-host status", info.PID)
 	}
-	rf := &runFile{path: path, info: runInfo{PID: os.Getpid(), StatusURL: statusURL}}
+	rf := &runFile{path: path, info: runInfo{PID: os.Getpid(), StatusURL: statusURL, SettingsURL: settingsURL}}
 	data, _ := json.Marshal(rf.info)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return nil, fmt.Errorf("cannot write %s: %w", path, err)

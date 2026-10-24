@@ -39,6 +39,7 @@ Commands:
   serve       run the bridge in this console
   tray        run the bridge in the background with a notification-area icon (Windows)
   autostart   show or set whether the tray starts at login: autostart [on|off] (Windows)
+  settings    open the settings page in your browser
   status      show a running bridge's listeners, relays and sessions
   token       print the token clients must send (-new: make a client token)
   doctor      check that this machine can run the bridge
@@ -69,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSetup(rest, os.Stdin, stdout, stderr)
 	case "connect":
 		return runConnect(rest, stdout, stderr)
+	case "settings":
+		return runSettings(rest, stdout, stderr)
 	case "start":
 		return runStart(rest, stdout, stderr)
 	case "stop":
@@ -217,7 +220,7 @@ func runServe(args []string, stderr io.Writer) int {
 	// Ctrl+C, and on Windows closing the console window, arrive here.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := runBridge(ctx, *path, log, nil); err != nil {
+	if err := runBridge(ctx, *path, log, "", nil); err != nil {
 		log.Error("studiolink-host stopped", "err", err)
 		return 1
 	}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"golang.org/x/sys/windows"
 
 	"studiolink/internal/autostart"
+	"studiolink/internal/netif"
+	"studiolink/internal/studio"
 )
 
 // runTray starts the bridge in the background with an icon in the
@@ -50,13 +53,108 @@ func runTray(args []string, stdout, stderr io.Writer) int {
 	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: level}))
 
 	t := &tray{cfgPath: abs, logPath: logPath, log: log, done: make(chan error, 1)}
+	// The settings page lives as long as the tray, across bridge restarts.
+	t.settings = &settingsServer{
+		cfgPath:      abs,
+		restart:      t.restartBridge,
+		status:       t.bridgeStatus,
+		adapters:     netif.List,
+		autostart:    autostart.Default,
+		autostartCmd: autostart.Command(executable(), abs),
+		open:         t.openTarget,
+		launcher:     studio.FindLauncher,
+	}
+	settingsURL, err := t.settings.start()
+	if err != nil {
+		messageBox("StudioLink could not start", err.Error())
+		return 1
+	}
+	t.settingsURL = settingsURL
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
-	go func() {
-		t.done <- runBridge(ctx, abs, log, func(b *bridge) { t.bridge.Store(b) })
-	}()
+	go t.runBridges(ctx)
 	systray.Run(t.onReady, cancel)
 	return t.exitCode
+}
+
+// runBridges runs the bridge until ctx ends. A settings change restarts it:
+// the current run ends and a new one starts with the saved config.
+func (t *tray) runBridges(ctx context.Context) {
+	for {
+		bctx, cancel := context.WithCancel(ctx)
+		t.mu.Lock()
+		t.cancelBridge = cancel
+		t.mu.Unlock()
+		err := runBridge(bctx, t.cfgPath, t.log, t.settingsURL, func(b *bridge) {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			if bctx.Err() == nil {
+				t.bridge.Store(b)
+			}
+		})
+		cancel()
+		t.mu.Lock()
+		t.cancelBridge = nil
+		t.bridge.Store(nil)
+		again := t.restarting
+		t.restarting = false
+		t.mu.Unlock()
+		if again && ctx.Err() == nil {
+			t.log.Info("restarting the bridge with the saved settings")
+			continue
+		}
+		t.done <- err
+		return
+	}
+}
+
+// restartBridge ends the running bridge so runBridges starts it again. The
+// status reads as not running until then.
+func (t *tray) restartBridge() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.cancelBridge == nil {
+		return
+	}
+	t.restarting = true
+	t.bridge.Store(nil)
+	t.cancelBridge()
+}
+
+// bridgeStatus is the running bridge's status, or nil while none is up.
+func (t *tray) bridgeStatus() *Status {
+	b := t.bridge.Load()
+	if b == nil {
+		return nil
+	}
+	st := b.Status()
+	return &st
+}
+
+// openSettings opens the settings page in the default browser, signed in.
+func (t *tray) openSettings() {
+	link, err := t.settings.newLoginURL()
+	if err == nil {
+		err = openURL(link)
+	}
+	if err != nil {
+		t.log.Error("cannot open settings", "err", err)
+	}
+}
+
+// openTarget shows the config file in its folder, or any other file in
+// Notepad.
+func (t *tray) openTarget(target string) {
+	if target == t.cfgPath {
+		_ = exec.Command("explorer.exe", "/select,", t.cfgPath).Start()
+		return
+	}
+	openFile(target)
+}
+
+// openURL opens a URL in the default browser.
+func openURL(url string) error {
+	return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
 
 // detachTray launches exe's tray as a process with no console.
@@ -132,6 +230,15 @@ type tray struct {
 	done             chan error
 	exitCode         int
 
+	settings    *settingsServer
+	settingsURL string
+
+	// mu guards cancelBridge and restarting, and keeps the bridge pointer
+	// in step with them.
+	mu           sync.Mutex
+	cancelBridge context.CancelFunc // ends the running bridge, or nil
+	restarting   bool               // set while a settings change restarts it
+
 	summary *systray.MenuItem
 	relays  []*systray.MenuItem
 	login   *systray.MenuItem
@@ -145,6 +252,7 @@ func (t *tray) onReady() {
 
 	t.summary = systray.AddMenuItem("Starting...", "")
 	t.summary.Disable()
+	settingsItem := systray.AddMenuItem("Settings…", "Open StudioLink's settings in your browser")
 	if cfg, err := loadConfig(t.cfgPath); err == nil {
 		for range cfg.Relays {
 			item := systray.AddMenuItem("", "")
@@ -176,6 +284,8 @@ func (t *tray) onReady() {
 				if b := t.bridge.Load(); b != nil && b.audit.Path() != "" {
 					openFile(b.audit.Path())
 				}
+			case <-settingsItem.ClickedCh:
+				t.openSettings()
 			case <-openFolder.ClickedCh:
 				_ = exec.Command("explorer.exe", "/select,", t.cfgPath).Start()
 			case <-t.login.ClickedCh:

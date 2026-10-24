@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -20,6 +19,18 @@ import (
 )
 
 const savedHeader = "# Written by studiolink-client save. Holds the bridge token: keep it private.\n"
+
+// hostOwned reports whether path is the studiolink.env that studiolink-host
+// wrote on this machine, which the client must leave alone.
+func hostOwned(path string) bool {
+	old, err := readFile(path)
+	return err == nil && bytes.HasPrefix(old, []byte("# Written by studiolink-host"))
+}
+
+// saveEnv writes the client's studiolink.env with the given KEY, value pairs.
+func saveEnv(path string, kv ...string) error {
+	return tokenfile.WriteValues(path, savedHeader, kv...)
+}
 
 // runSave stores the bridge's URL and token in studiolink.env, so connect,
 // check and relay need no flags or environment. The token comes from
@@ -37,20 +48,17 @@ func runSave(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv fu
 		fmt.Fprintln(stderr, "save: no home directory to save in")
 		return 1
 	}
-	if old, err := readFile(path); err == nil && bytes.HasPrefix(old, []byte("# Written by studiolink-host")) {
+	if hostOwned(path) {
 		fmt.Fprintf(stderr, "save: %s belongs to studiolink-host on this machine; the client already uses it\n", path)
 		return 1
 	}
 	if *rawURL != "" {
-		u, err := url.Parse(*rawURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			fmt.Fprintf(stderr, "save: bad -url %q: want http(s)://host:port/mcp\n", *rawURL)
+		u, err := normalizeBridgeURL(*rawURL)
+		if err != nil {
+			fmt.Fprintf(stderr, "save: bad -url %q: want http(s)://host:port/mcp (%v)\n", *rawURL, err)
 			return 2
 		}
-		if u.Path == "" || u.Path == "/" {
-			u.Path = "/mcp"
-		}
-		*rawURL = u.String()
+		*rawURL = u
 	}
 
 	var token string
@@ -85,7 +93,7 @@ func runSave(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv fu
 		kv = append(kv, "STUDIOLINK_URL", *rawURL)
 	}
 	kv = append(kv, tokenfile.Key, token)
-	if err := tokenfile.WriteValues(path, savedHeader, kv...); err != nil {
+	if err := saveEnv(path, kv...); err != nil {
 		fmt.Fprintln(stderr, "save:", err)
 		return 1
 	}

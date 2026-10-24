@@ -45,9 +45,10 @@ type bridge struct {
 	tailnetURL string
 }
 
-// runBridge serves until ctx ends or a listener fails. ready, if set, is
-// called once everything has started.
-func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func(*bridge)) error {
+// runBridge serves until ctx ends or a listener fails. settingsURL is the
+// settings page the tray serves, recorded in the run file; "" when there is
+// none. ready, if set, is called once everything has started.
+func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, settingsURL string, ready func(*bridge)) error {
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		return err
@@ -72,7 +73,7 @@ func runBridge(ctx context.Context, cfgPath string, log *slog.Logger, ready func
 		return fmt.Errorf("cannot open the status port: %w", err)
 	}
 	defer ctrlLn.Close()
-	b.run, err = claimRunFile(runFilePath(abs), "http://"+ctrlLn.Addr().String())
+	b.run, err = claimRunFile(runFilePath(abs), "http://"+ctrlLn.Addr().String(), settingsURL)
 	if err != nil {
 		return err
 	}

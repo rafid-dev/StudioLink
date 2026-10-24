@@ -20,6 +20,7 @@ import (
 
 	"studiolink/internal/shim"
 	"studiolink/internal/version"
+	"studiolink/internal/winenv"
 )
 
 const usage = `studiolink-client: connect an AI agent to a remote studiolink-host.
@@ -32,6 +33,7 @@ Commands:
                (this is the command to give your agent)
   check        test the connection and print what the bridge offers
   save         remember the bridge's URL and token on this machine
+  setup        guided setup: find the bridge, save the token, add Studio to Claude Code or Codex
   relay        on a server the Studio PC can reach: accept studiolink-host's
                tunnel and serve agents on this server (dial-out mode)
   fingerprint  print the relay certificate's fingerprint for studiolink.json
@@ -54,6 +56,10 @@ func main() {
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
+		// Double-clicked on Windows: there is nothing to type, so set up.
+		if winenv.OpenedFromExplorer() {
+			return runDoubleClick(stdin, stdout, stderr, getenv)
+		}
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
@@ -64,6 +70,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return runCheck(args[1:], stdout, stderr, getenv)
 	case "save":
 		return runSave(args[1:], stdin, stdout, stderr, getenv)
+	case "setup":
+		return runSetup(args[1:], stdin, stdout, stderr, getenv)
 	case "relay":
 		return runRelay(args[1:], stdout, stderr, getenv)
 	case "fingerprint":

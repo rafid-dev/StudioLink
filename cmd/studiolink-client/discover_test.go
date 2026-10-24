@@ -15,6 +15,7 @@ import (
 	"studiolink/internal/hostserver"
 	"studiolink/internal/mcptest"
 	"studiolink/internal/tokenfile"
+	"studiolink/internal/winenv"
 )
 
 // TestMain keeps tests from finding a real bridge running on this machine,
@@ -22,6 +23,7 @@ import (
 func TestMain(m *testing.M) {
 	probeHealth = func(context.Context, string) bool { return false }
 	inContainer = func() bool { return false }
+	winenv.OpenedFromExplorer = func() bool { return false }
 	os.Exit(m.Run())
 }
 

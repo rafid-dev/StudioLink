@@ -80,6 +80,12 @@ multiplexes sessions over it with yamux. Reconnects with backoff; heartbeats.
    Studio: setup, re-setup, start/stop, discovery on Windows, in WSL2 (via the
    gateway) and in Docker (env file and secret mount), `/install.sh`, a
    `list_roblox_studios` call over stdio, and a Docker relay via `add-relay`.
+8. Settings page and client setup (done): the tray serves a settings page on
+   127.0.0.1 (one-time link from the tray or `settings` command) for where
+   agents connect, Tailscale, relays, start at login, tokens, connect commands
+   and logs; changes restart the bridge. `studiolink-client setup` finds the
+   bridge, checks the token, saves it, installs the client on Windows and adds
+   Studio to Claude Code and Codex.
 
 ## Prior art
 - Yeetback (`docker/claude/`): Python `mcp-proxy` over HTTP on 127.0.0.1:8765.

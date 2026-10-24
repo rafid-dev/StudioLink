@@ -7,8 +7,12 @@ studiolink-host connect wsl
 prints these steps for your setup.
 
 ## On Windows
-Setup asks "WSL2 is installed. Let its distros use Studio?" when it finds the
-WSL adapter; say yes. Otherwise add the adapter from `studiolink-host interfaces`
+Open Settings from the tray icon (**Settings…**) or with
+`studiolink-host settings`, and tick the WSL adapter under **Where agents can
+connect**. The bridge restarts by itself. Setup also asks "WSL2 is installed.
+Let its distros use Studio?" when it finds the WSL adapter; say yes there.
+
+To set it by hand instead, add the adapter from `studiolink-host interfaces`
 to `listen_interfaces` and restart the bridge (`studiolink-host stop`,
 `studiolink-host start`).
 
@@ -16,6 +20,18 @@ In mirrored networking mode (`networkingMode=mirrored` in `%USERPROFILE%\.wslcon
 distros share Windows' loopback, and the default `127.0.0.1:44770` is enough.
 
 ## In the distro
+Install the client from the bridge, then run setup:
+
+```bash
+curl -fsSL http://$(ip route show default | awk '{print $3}'):44770/install.sh | sh
+studiolink-client setup
+```
+
+`setup` finds the bridge at `127.0.0.1` or the default gateway, checks the
+token against it, saves it and adds Studio to Claude Code or Codex when they
+are installed.
+
+## Manual alternative
 ```bash
 curl -fsSL http://$(ip route show default | awk '{print $3}'):44770/install.sh | sh
 studiolink-client check

@@ -1,27 +1,42 @@
 # Agents in local VMs (Hyper-V, VMware, VirtualBox)
 
-```powershell
-studiolink-host connect vm
-```
-
-prints these steps with your addresses and token filled in.
-
 ## On Windows
-`studiolink-host interfaces` lists the adapters and what each connects to.
-Add the one your VMs use, by name, to the config
+Open Settings from the tray icon (**Settings…**) or with
+`studiolink-host settings`. Under **Where agents can connect**, tick the
+adapter your VMs use (Hyper-V, VMware NAT or VirtualBox) and apply. The bridge
+restarts by itself and follows the adapter's address when it changes.
+
+Windows Firewall may block the VM. Allow `studiolink-host.exe` on that
+network (Windows asks the first time; choose Private networks only).
+
+To set it by hand instead, `studiolink-host interfaces` lists the adapters and
+what each connects to. Add the one your VMs use, by name, to the config
 (`%APPDATA%\StudioLink\studiolink.json`):
 
 ```json
 "listen_interfaces": [{"name": "vEthernet (Default Switch)", "port": 44770}]
 ```
 
-then `studiolink-host stop` and `studiolink-host start`. The bridge follows the
-adapter's address when it changes.
-
-Windows Firewall may block the VM. Allow `studiolink-host.exe` on that
-network (Windows asks the first time; choose Private networks only).
+then `studiolink-host stop` and `studiolink-host start`.
 
 ## In the VM
+Install the client from the bridge, then run setup:
+
+```bash
+curl -fsSL http://<host>:44770/install.sh | sh
+studiolink-client setup
+```
+
+`setup` finds the bridge at the host's address, or asks for it (the settings
+page shows it). It asks for the token without showing it, checks the token
+against the bridge and saves it. It adds Studio to Claude Code or Codex when
+they are installed.
+
+On a Windows VM, download
+`http://<host>:44770/download/studiolink-client-windows-amd64.exe` and
+double-click it. That runs setup too.
+
+## Manual alternative
 Claude Code:
 
 ```bash
@@ -57,3 +72,6 @@ chmod +x studiolink-client && sudo mv studiolink-client /usr/local/bin/
 (readable by you only), so the agent's command needs no flags or
 environment. On a Windows VM, download
 `http://<host>:44770/download/studiolink-client-windows-amd64.exe` instead.
+
+For the same commands with your addresses and token filled in, run
+`studiolink-host connect vm` on the Studio PC.

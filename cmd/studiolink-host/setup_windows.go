@@ -202,6 +202,16 @@ func setup(o setupOptions, in *bufio.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Interactive setup ends on the settings page, where the network,
+	// port and Tailscale are chosen.
+	if info, err := readRunFile(runFilePath(abs)); !o.yes && err == nil && info.alive() && info.SettingsURL != "" {
+		if err := openSettings(abs, cfg.Token); err != nil {
+			fmt.Fprintln(stdout, "!  Could not open settings: "+err.Error())
+		} else {
+			fmt.Fprintln(stdout, "Opened StudioLink settings in your browser: choose where agents can connect there.")
+		}
+	}
+
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Done. Look for the StudioLink icon in the notification area.")
 	fmt.Fprintln(stdout)

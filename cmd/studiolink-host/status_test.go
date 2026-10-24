@@ -27,12 +27,12 @@ func TestClaimRunFile(t *testing.T) {
 	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer live.Close()
 
-	rf, err := claimRunFile(path, live.URL)
+	rf, err := claimRunFile(path, live.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A second copy finds the first one answering.
-	if _, err := claimRunFile(path, "http://127.0.0.1:1"); err == nil || !strings.Contains(err.Error(), "already running") {
+	if _, err := claimRunFile(path, "http://127.0.0.1:1", ""); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Errorf("second claim: %v", err)
 	}
 	rf.release()
@@ -42,7 +42,7 @@ func TestClaimRunFile(t *testing.T) {
 
 	// A stale file from a crashed bridge is taken over.
 	os.WriteFile(path, []byte(`{"pid":1,"status_url":"http://127.0.0.1:1"}`), 0o600)
-	if rf, err = claimRunFile(path, live.URL); err != nil {
+	if rf, err = claimRunFile(path, live.URL, ""); err != nil {
 		t.Fatalf("claim over a stale file: %v", err)
 	}
 	// release leaves a file another process has since claimed.

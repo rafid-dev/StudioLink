@@ -4,7 +4,7 @@ Lets AI agents in VMs, Docker containers, on Tailscale peers or on external
 servers use Roblox Studio's MCP server, which normally only works on the
 Windows machine running Studio.
 
-**Status:** phase 7. Agents in local Docker containers, WSL2 and local VMs,
+**Status:** phase 8. Agents in local Docker containers, WSL2 and local VMs,
 and on Tailscale peers can connect over HTTP with a token, directly or through
 `studiolink-client` for agents that only run stdio MCP servers. Agents on
 external servers connect through a relay that the Studio PC dials out to.
@@ -23,8 +23,16 @@ On the Windows PC with Roblox Studio:
    with a new token, offers WSL2 access and start at login, and starts the
    bridge in the notification area. Run it again any time; it keeps your
    config and token.
-2. In a new terminal, print the commands for where your agent runs, with
-   your address and token filled in:
+2. Open Settings (the tray icon's **Settings…** item, or
+   `studiolink-host settings`) and tick where your agents run: this PC,
+   WSL2, a VM's network adapter, Tailscale. Changes are saved and the bridge
+   restarts by itself. See [Settings page](#settings-page).
+3. On the machine where your agent runs, run `studiolink-client setup`. It
+   finds the bridge, asks for the token, checks it and adds Studio to Claude
+   Code or Codex when they are installed.
+
+Manual setup: in a new terminal, print the commands for where your agent
+runs, with your address and token filled in:
 
 ```powershell
 studiolink-host connect            # lists: docker, wsl, vm, tailscale, server
@@ -75,7 +83,10 @@ container, on Windows' side of WSL2 (loopback, then the default gateway) and
 on `127.0.0.1`. It takes the token from `-token-file`, `STUDIOLINK_TOKEN`,
 `STUDIOLINK_TOKEN_FILE`, `/run/secrets/studiolink_token`, its saved
 `studiolink.env`, and in WSL2 the bridge's own file. Elsewhere (a VM, a
-tailnet peer), run once:
+tailnet peer), the easier option is `studiolink-client setup`. It finds the
+bridge (or asks for its address), asks for the token without showing it,
+checks it and adds Studio to Claude Code or Codex. To save the URL and token
+yourself, run once:
 
 ```bash
 studiolink-client save -url http://<bridge>:44770/mcp   # asks for the token, checks it, saves it
@@ -190,6 +201,26 @@ adds the tray to your Windows login items.
 This is a login item rather than a Windows service on purpose: a service
 runs in session 0, apart from your desktop, where it cannot see Studio or
 your `%LOCALAPPDATA%\Roblox\mcp.bat`.
+
+### Settings page
+The tray's **Settings…** item, or `studiolink-host settings`, opens the
+settings page in your browser. Setup opens it at the end too. On the page you
+can:
+
+- choose where agents can connect: this PC, one checkbox per network adapter
+  (WSL2, VMware NAT, VirtualBox, Hyper-V, LAN) and the port;
+- turn Tailscale on or off and set the device name;
+- paste an `add-relay` command or remove relays;
+- turn start at login on or off;
+- make a new token;
+- copy the connect commands for Docker, WSL2, a VM, Tailscale and server
+  (the token stays hidden until you click **Show token**);
+- open the log, the audit log and the config folder;
+- restart the bridge.
+
+Changes are saved to `studiolink.json` and the bridge restarts by itself. Only
+the browser opened with a one-time link from the tray or the `settings`
+command can use the page, and the page only listens on 127.0.0.1.
 
 ## How it behaves
 - Each MCP session gets its own StudioMCP process, inside a Windows Job

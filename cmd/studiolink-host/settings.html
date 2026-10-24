@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StudioLink</title>
+<style>
+:root {
+  --bg: #f5f6f8; --card: #ffffff; --text: #1d2129; --muted: #5d6877; --line: #d8dde5;
+  --accent: #2563eb; --accent-text: #ffffff; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+  --code: #eef1f5; --input: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161a; --card: #1d2026; --text: #e7e9ee; --muted: #9aa3b2; --line: #343a43;
+    --accent: #60a5fa; --accent-text: #0b1220; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    --code: #13151a; --input: #14161a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14161a; --card: #1d2026; --text: #e7e9ee; --muted: #9aa3b2; --line: #343a43;
+  --accent: #60a5fa; --accent-text: #0b1220; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+  --code: #13151a; --input: #14161a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 760px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 22px; margin: 8px 0 12px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; margin: 0 0 14px;
+}
+.status { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 14px; }
+.pill {
+  display: inline-block; padding: 3px 10px; border-radius: 999px; font-weight: 600;
+  color: #fff; background: var(--muted);
+}
+.pill.ok { background: var(--ok); }
+.pill.warn { background: var(--warn); }
+.pill.bad { background: var(--bad); }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.mono, pre, code { font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; }
+.hint { color: var(--muted); font-size: 13px; margin: 8px 0; }
+.banner {
+  background: var(--bad); color: #fff; padding: 10px 12px; border-radius: 8px; margin: 0 0 14px;
+}
+.row { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; }
+.row input[type="checkbox"] { margin-top: 4px; }
+label { display: block; margin: 8px 0; }
+label.row { display: flex; }
+input[type="text"], input[type="number"] {
+  width: 100%; margin-top: 4px; padding: 8px 10px; font: inherit; color: var(--text);
+  background: var(--input); border: 1px solid var(--line); border-radius: 6px;
+}
+input[type="number"] { width: 140px; }
+.adapter { padding: 6px 0; border-top: 1px solid var(--line); }
+.adapter:first-child { border-top: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+button {
+  font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line);
+  border-radius: 6px; padding: 7px 14px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .55; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.danger { color: var(--bad); }
+button[aria-selected="true"], button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+pre.code {
+  background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+  white-space: pre-wrap; word-break: break-all; overflow-x: auto; margin: 0; font-size: 13px;
+  min-height: 6em;
+}
+.list { list-style: none; padding: 0; margin: 0 0 12px; }
+.list li {
+  display: flex; justify-content: space-between; gap: 10px; align-items: center;
+  padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap;
+}
+.list li:first-child { border-top: 0; }
+.note { min-height: 1.4em; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+.note.bad { color: var(--bad); }
+.ok-text { color: var(--ok); }
+@media (max-width: 480px) {
+  main { padding: 12px; }
+  .card { padding: 12px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>StudioLink</h1>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <header class="status" aria-live="polite">
+    <span id="pill" class="pill">Checking...</span>
+    <span id="studio" class="muted small"></span>
+    <span id="version" class="muted small"></span>
+    <span id="sessions" class="muted small"></span>
+  </header>
+
+  <section class="card" aria-labelledby="h-network">
+    <h2 id="h-network">Where agents can connect</h2>
+    <label class="row">
+      <input type="checkbox" id="loopback">
+      <span>This PC and Docker containers (127.0.0.1)</span>
+    </label>
+    <div id="adapters"></div>
+    <label>Port
+      <input type="number" id="port" min="1" max="65535" inputmode="numeric">
+    </label>
+    <p class="hint">Windows may ask to allow StudioLink through the firewall. VMware and VirtualBox networks are often Public networks.</p>
+    <div class="actions"><button id="apply-network" class="primary">Apply</button></div>
+    <p id="note-network" class="note" role="status"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-connect">
+    <h2 id="h-connect">Connect an agent</h2>
+    <div id="tabs" class="tabs" role="tablist"></div>
+    <pre id="connect" class="code">Loading...</pre>
+    <div class="actions">
+      <button id="reveal" aria-pressed="false">Show token</button>
+      <button id="copy">Copy</button>
+      <button id="copy-token">Copy token</button>
+    </div>
+    <p id="note-connect" class="note" role="status"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-ts">
+    <h2 id="h-ts">Tailscale</h2>
+    <label class="row">
+      <input type="checkbox" id="ts-enabled">
+      <span>Serve on my tailnet</span>
+    </label>
+    <label>Device name
+      <input type="text" id="ts-name" placeholder="studiolink" maxlength="63" autocomplete="off" spellcheck="false">
+    </label>
+    <p id="ts-url" class="mono small muted"></p>
+    <p class="hint">The first time, open the log to find the Tailscale login link.</p>
+    <div class="actions"><button id="ts-save" class="primary">Save</button></div>
+    <p id="note-ts" class="note" role="status"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-relays">
+    <h2 id="h-relays">Relays</h2>
+    <p class="hint">Servers this PC dials out to, so agents there can reach Studio.</p>
+    <ul id="relays" class="list"></ul>
+    <label>Paste the add-relay command your server printed
+      <input type="text" id="relay-cmd" autocomplete="off" spellcheck="false" placeholder="studiolink-host add-relay wss://server:44771 sha256:...">
+    </label>
+    <div class="actions"><button id="relay-add" class="primary">Add</button></div>
+    <p id="note-relays" class="note" role="status"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-general">
+    <h2 id="h-general">General</h2>
+    <label class="row">
+      <input type="checkbox" id="autostart">
+      <span>Start at login</span>
+    </label>
+    <div class="actions">
+      <button id="open-log">Open log</button>
+      <button id="open-audit">Open audit log</button>
+      <button id="open-folder">Open config folder</button>
+      <button id="restart">Restart bridge</button>
+      <button id="new-token" class="danger">New token...</button>
+    </div>
+    <p id="note-general" class="note" role="status"></p>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const scenarios = [
+    ["docker", "Docker"], ["wsl", "WSL2"], ["vm", "VM"], ["tailscale", "Tailscale"], ["server", "Server"],
+  ];
+  let scenario = "docker";
+  let reveal = false;
+  let restarting = false;
+  let last = null;
+
+  async function api(path, method, body) {
+    const opts = { method: method || "GET", headers: { "X-StudioLink": "1" }, credentials: "same-origin" };
+    if (opts.method === "POST") {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body || {});
+    }
+    const res = await fetch(path, opts);
+    const type = res.headers.get("Content-Type") || "";
+    if (!res.ok) {
+      let msg = res.status + " " + res.statusText;
+      if (type.includes("json")) {
+        try { msg = (await res.json()).error || msg; } catch (e) { /* keep the status */ }
+      } else {
+        const text = (await res.text()).trim();
+        if (text) msg = text;
+      }
+      throw new Error(msg);
+    }
+    return type.includes("json") ? res.json() : res.text();
+  }
+
+  function show(id, text, bad) {
+    const el = $(id);
+    el.textContent = text || "";
+    el.className = "note" + (bad ? " bad" : "");
+  }
+
+  function banner(text) {
+    const el = $("banner");
+    el.textContent = text;
+    el.hidden = false;
+  }
+
+  function render(s) {
+    last = s;
+    const pill = $("pill");
+    let cls = "bad", label = "Stopped";
+    if (restarting) { cls = "warn"; label = "Restarting..."; }
+    else if (s.bridge_running) { cls = "ok"; label = "Running"; }
+    pill.className = "pill " + cls;
+    pill.textContent = label;
+    $("studio").textContent = s.studio.found
+      ? "Roblox Studio MCP found"
+      : "Roblox Studio MCP not found" + (s.studio.error ? ": " + s.studio.error : "");
+    $("version").textContent = "studiolink-host " + s.version;
+    const n = s.sessions.length;
+    $("sessions").textContent = n + (n === 1 ? " agent session" : " agent sessions");
+    const ts = s.tailscale;
+    $("ts-url").textContent = ts.url ? "Tailnet address: " + ts.url : (ts.enabled ? "Starts with the bridge." : "");
+    renderRelays(s.relays);
+  }
+
+  function renderRelays(relays) {
+    const list = $("relays");
+    list.replaceChildren();
+    if (!relays.length) {
+      const li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = "No relays yet.";
+      list.append(li);
+      return;
+    }
+    for (const r of relays) {
+      const li = document.createElement("li");
+      const info = document.createElement("div");
+      const url = document.createElement("span");
+      url.className = "mono";
+      url.textContent = r.url;
+      const status = document.createElement("span");
+      status.className = r.connected ? "ok-text small" : "small muted";
+      status.textContent = r.connected ? "connected" : "down" + (r.last_error ? ": " + r.last_error : "");
+      info.append(url, document.createElement("br"), status);
+      const remove = document.createElement("button");
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => change("note-relays", "/api/relays/remove", { url: r.url }));
+      li.append(info, remove);
+      list.append(li);
+    }
+  }
+
+  function syncForms(s) {
+    $("loopback").checked = s.loopback;
+    $("port").value = s.port;
+    const box = $("adapters");
+    box.replaceChildren();
+    if (!s.adapters.length) {
+      const p = document.createElement("p");
+      p.className = "muted small";
+      p.textContent = "No other network adapters found.";
+      box.append(p);
+    }
+    for (const a of s.adapters) {
+      const label = document.createElement("label");
+      label.className = "row adapter";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = a.enabled;
+      cb.dataset.name = a.name;
+      const text = document.createElement("span");
+      const kind = document.createElement("strong");
+      kind.textContent = a.kind;
+      const detail = document.createElement("span");
+      detail.className = "muted small";
+      detail.textContent = a.name + (a.ipv4 ? " · " + a.ipv4 : "") + (a.up ? "" : " · not connected");
+      text.append(kind, document.createElement("br"), detail);
+      label.append(cb, text);
+      box.append(label);
+    }
+    $("ts-enabled").checked = s.tailscale.enabled;
+    $("ts-name").value = s.tailscale.hostname || "";
+    $("autostart").checked = s.autostart;
+  }
+
+  function buildTabs() {
+    const tabs = $("tabs");
+    tabs.replaceChildren();
+    for (const [id, label] of scenarios) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.setAttribute("role", "tab");
+      b.dataset.id = id;
+      b.setAttribute("aria-selected", String(id === scenario));
+      b.addEventListener("click", () => {
+        scenario = id;
+        for (const t of tabs.children) t.setAttribute("aria-selected", String(t.dataset.id === id));
+        loadConnect().catch((e) => show("note-connect", e.message, true));
+      });
+      tabs.append(b);
+    }
+  }
+
+  async function loadConnect() {
+    const text = await api("/api/connect?scenario=" + encodeURIComponent(scenario) + "&reveal=" + (reveal ? "1" : "0"));
+    $("connect").textContent = text;
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.append(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    }
+  }
+
+  // waitRunning waits until the bridge is serving again after a restart.
+  async function waitRunning() {
+    restarting = true;
+    const deadline = Date.now() + 30000;
+    let up = false;
+    while (!up && Date.now() < deadline) {
+      await sleep(400);
+      try {
+        const s = await api("/api/state");
+        up = s.bridge_running;
+      } catch (e) { /* keep waiting */ }
+    }
+    restarting = false;
+    if (!up) throw new Error("The bridge has not come back after 30 seconds. Open the log to see why.");
+  }
+
+  async function refresh(sync) {
+    try {
+      const s = await api("/api/state");
+      render(s);
+      banner_clear();
+      if (sync) {
+        syncForms(s);
+        await loadConnect().catch((e) => show("note-connect", e.message, true));
+      }
+    } catch (e) {
+      banner(e.message);
+    }
+  }
+
+  function banner_clear() { $("banner").hidden = true; }
+
+  // change posts a config change, waits for the bridge to restart and
+  // reloads the forms. It returns whether the change was saved.
+  async function change(note, path, body) {
+    show(note, "Saving...");
+    try {
+      await api(path, "POST", body);
+      show(note, "Restarting the bridge...");
+      await waitRunning();
+      show(note, "Saved.");
+      await refresh(true);
+      return true;
+    } catch (e) {
+      show(note, e.message, true);
+      return false;
+    }
+  }
+
+  $("apply-network").addEventListener("click", () => {
+    const adapters = [...document.querySelectorAll("#adapters input")]
+      .filter((cb) => cb.checked)
+      .map((cb) => cb.dataset.name);
+    change("note-network", "/api/network", {
+      loopback: $("loopback").checked,
+      port: Number($("port").value),
+      adapters,
+    });
+  });
+
+  $("reveal").addEventListener("click", () => {
+    reveal = !reveal;
+    $("reveal").textContent = reveal ? "Hide token" : "Show token";
+    $("reveal").setAttribute("aria-pressed", String(reveal));
+    loadConnect().catch((e) => show("note-connect", e.message, true));
+  });
+
+  $("copy").addEventListener("click", async () => {
+    try {
+      const text = await api("/api/connect?scenario=" + encodeURIComponent(scenario) + "&reveal=1");
+      const ok = await copyText(text);
+      show("note-connect", ok ? "Copied. It contains your token; don't paste it into chats." : "Could not copy. Select the text instead.", !ok);
+    } catch (e) {
+      show("note-connect", e.message, true);
+    }
+  });
+
+  $("copy-token").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/token");
+      const ok = await copyText(data.token);
+      show("note-connect", ok ? "Copied the token." : "Could not copy the token.", !ok);
+    } catch (e) {
+      show("note-connect", e.message, true);
+    }
+  });
+
+  $("ts-save").addEventListener("click", () => {
+    change("note-ts", "/api/tailscale", {
+      enabled: $("ts-enabled").checked,
+      hostname: $("ts-name").value.trim(),
+    });
+  });
+
+  $("relay-add").addEventListener("click", async () => {
+    const cmd = $("relay-cmd").value.trim();
+    if (!cmd) {
+      show("note-relays", "Paste the command first.", true);
+      return;
+    }
+    if (await change("note-relays", "/api/relays/add", { command: cmd })) {
+      $("relay-cmd").value = "";
+    }
+  });
+
+  $("autostart").addEventListener("change", async (e) => {
+    const on = e.target.checked;
+    try {
+      await api("/api/autostart", "POST", { enabled: on });
+      show("note-general", on ? "StudioLink starts when you log in." : "StudioLink will not start at login.");
+    } catch (err) {
+      e.target.checked = !on;
+      show("note-general", err.message, true);
+    }
+  });
+
+  async function openWhat(what) {
+    try {
+      await api("/api/open", "POST", { what });
+      show("note-general", "Opened.");
+    } catch (e) {
+      show("note-general", e.message, true);
+    }
+  }
+  $("open-log").addEventListener("click", () => openWhat("log"));
+  $("open-audit").addEventListener("click", () => openWhat("audit"));
+  $("open-folder").addEventListener("click", () => openWhat("folder"));
+
+  $("restart").addEventListener("click", async () => {
+    show("note-general", "Restarting the bridge...");
+    try {
+      await api("/api/restart", "POST", {});
+      await waitRunning();
+      show("note-general", "Restarted.");
+      await refresh(false);
+    } catch (e) {
+      show("note-general", e.message, true);
+    }
+  });
+
+  $("new-token").addEventListener("click", () => {
+    if (!confirm("Every agent will need the new token. Continue?")) return;
+    change("note-general", "/api/token/new", {});
+  });
+
+  buildTabs();
+  refresh(true);
+  setInterval(() => refresh(false), 3000);
+})();
+</script>
+</body>
+</html>

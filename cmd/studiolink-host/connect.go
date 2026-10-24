@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -58,6 +59,22 @@ func runConnect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	text, err := connectText(abs, cfg, fset.Arg(0))
+	if errors.Is(err, errUnknownScenario) {
+		fset.Usage()
+		return 2
+	}
+	fmt.Fprint(stdout, text)
+	return 0
+}
+
+var errUnknownScenario = errors.New("unknown connect scenario")
+
+// connectText returns what "studiolink-host connect [name]" prints for the
+// config at abs: the menu when name is "", otherwise that scenario's
+// commands. The settings page shows the same text.
+func connectText(abs string, cfg *config.Config, name string) (string, error) {
+	var b strings.Builder
 	r := &recipes{cfg: cfg, envPath: tokenfile.PathFor(abs), downloads: newDownloads(), mirrored: wslMirrored()}
 	r.adapters, _ = netif.List()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -65,34 +82,32 @@ func runConnect(args []string, stdout, stderr io.Writer) int {
 	if st, err := fetchStatus(ctx, abs, cfg.Token); err == nil {
 		r.tailnetURL = st.Tailnet
 	} else {
-		fmt.Fprintln(stdout, "Note: the bridge is not running; start it with \"studiolink-host start\".")
-		fmt.Fprintln(stdout)
+		fmt.Fprintln(&b, "Note: the bridge is not running; start it with \"studiolink-host start\".")
+		fmt.Fprintln(&b)
 	}
 	// The env file is how containers get the token; make sure it exists even
 	// before the first start.
 	_ = tokenfile.Write(r.envPath, cfg.Token)
 
-	name := fset.Arg(0)
 	if name == "" {
-		fmt.Fprintln(stdout, "Where does your agent run?")
-		fmt.Fprintln(stdout)
+		fmt.Fprintln(&b, "Where does your agent run?")
+		fmt.Fprintln(&b)
 		for _, s := range scenarios {
-			fmt.Fprintf(stdout, "  studiolink-host connect %-10s %s\n", s.name, s.what)
+			fmt.Fprintf(&b, "  studiolink-host connect %-10s %s\n", s.name, s.what)
 		}
-		fmt.Fprintln(stdout)
-		fmt.Fprintln(stdout, "Claude Code on this PC itself needs no bridge: add Studio's MCP server directly.")
-		return 0
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "Claude Code on this PC itself needs no bridge: add Studio's MCP server directly.")
+		return b.String(), nil
 	}
 	for _, s := range scenarios {
 		if s.name == name {
-			s.print(r, stdout)
-			fmt.Fprintln(stdout)
-			fmt.Fprintln(stdout, "These commands contain your token: don't paste them into chats or commit them.")
-			return 0
+			s.print(r, &b)
+			fmt.Fprintln(&b)
+			fmt.Fprintln(&b, "These commands contain your token: don't paste them into chats or commit them.")
+			return b.String(), nil
 		}
 	}
-	fset.Usage()
-	return 2
+	return "", errUnknownScenario
 }
 
 // loopbackPort is the port the bridge serves on this PC's loopback, or 0.
